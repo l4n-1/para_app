@@ -1,16 +1,21 @@
 # para2
 
-A new Flutter project.
+# 📝 Changelog
 
-## Getting Started
+## [COMMIT-10/13/2025-Leo]
+### Added
+- Email verification popup during sign-up. Checks for verification in real-time and directs User to pasahero_home after.
+- Settings integration placeholder (Settings->settingspage(scaffold), PHsettings(Widgets), THsettings(Widgets))
 
-This project is a starting point for a Flutter application.
+### Fixed 
+- Removed unnecessary lines of code from login.dart, signup_page2.dart
+- Arranged directories to keep workspace clean.
 
-A few resources to get you started if this is your first Flutter project:
+## Known Issues
+- Firebase pop up "Blocked due to unusual activity" when false, preventing added verification pop up and redirect to work.
+- Tsuperhero_activation.dart.
+- Google Sign in.
+- Login page appears longer on real devices compared to emulator view — “Create Account” button partially off-screen.
+- Google Maps not working on real device (probably devKey missing on my end).
 
-- [Lab: Write your first Flutter app](https://docs.flutter.dev/get-started/codelab)
-- [Cookbook: Useful Flutter samples](https://docs.flutter.dev/cookbook)
 
-For help getting started with Flutter development, view the
-[online documentation](https://docs.flutter.dev/), which offers tutorials,
-samples, guidance on mobile development, and a full API reference.
