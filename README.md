@@ -1,5 +1,3 @@
-# para2
-
 # 📝 Changelog
 
 ## [COMMIT-10/13/2025-Leo]
@@ -11,7 +9,7 @@
 - Removed unnecessary lines of code from login.dart, signup_page2.dart
 - Arranged directories to keep workspace clean.
 
-## Known Issues
+### Known Issues
 - Firebase pop up "Blocked due to unusual activity" when false, preventing added verification pop up and redirect to work.
 - Tsuperhero_activation.dart.
 - Google Sign in.
