@@ -1,0 +1,10 @@
+{
+    "configurations": [
+        {
+            "name": "Flutter (lib\\pages\\JeepneyRouteSimulator.dart)",
+            "type": "dart",
+            "request": "launch",
+            "program": "lib\\pages\\JeepneyRouteSimulator.dart"
+        }
+    ]
+}
