@@ -11,7 +11,7 @@ class SignupPage extends StatefulWidget {
 class _SignupPageState extends State<SignupPage> {
   final TextEditingController _firstNameController = TextEditingController();
   final TextEditingController _lastNameController = TextEditingController();
-  final TextEditingController _nickNameController = TextEditingController();
+  final TextEditingController _userNameController = TextEditingController();
   DateTime? _selectedDOB;
 
   Future<void> _pickDOB() async {
@@ -32,6 +32,7 @@ class _SignupPageState extends State<SignupPage> {
   void _goToNextStep() {
     if (_firstNameController.text.isEmpty ||
         _lastNameController.text.isEmpty ||
+        _userNameController.text.isEmpty ||
         _selectedDOB == null) {
       ScaffoldMessenger.of(context).showSnackBar(
         const SnackBar(content: Text('Please complete all required fields')),
@@ -45,7 +46,7 @@ class _SignupPageState extends State<SignupPage> {
         builder: (context) => SignupStep2(
           firstName: _firstNameController.text.trim(),
           lastName: _lastNameController.text.trim(),
-          nickName: _nickNameController.text.trim(),
+          userName: _userNameController.text.trim(),
           dob: _selectedDOB!,
         ),
       ),
@@ -100,9 +101,9 @@ class _SignupPageState extends State<SignupPage> {
               ),
               const SizedBox(height: 10),
               TextField(
-                controller: _nickNameController,
+                controller: _userNameController,
                 decoration: InputDecoration(
-                  hintText: 'Nickname (optional)',
+                  hintText: 'Username',
                   border: OutlineInputBorder(
                     borderRadius: BorderRadius.circular(25),
                     borderSide: BorderSide.none,

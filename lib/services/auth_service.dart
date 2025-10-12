@@ -13,7 +13,7 @@ class AuthService {
     required String password,
     required String firstName,
     required String lastName,
-    String? nickName,
+    required String userName,
     required DateTime dob,
   }) async {
     // Create account
@@ -29,7 +29,7 @@ class AuthService {
     await _firestore.collection('users').doc(userCredential.user!.uid).set({
       'firstName': firstName,
       'lastName': lastName,
-      'nickName': nickName ?? '',
+      'userName': userName ?? '',
       'dob': dob.toIso8601String(),
       'email': email,
       'createdAt': FieldValue.serverTimestamp(),
@@ -79,7 +79,7 @@ class AuthService {
         'lastName': googleUser.displayName!.split(' ').length > 1
             ? googleUser.displayName!.split(' ').last
             : '',
-        'nickName': '',
+        'userName': '',
         'dob': '',
         'email': googleUser.email,
         'createdAt': FieldValue.serverTimestamp(),

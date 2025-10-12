@@ -29,7 +29,7 @@ class _PasaheroHomeState extends State<PasaheroHome>
   static const Duration _panelAnimDuration = Duration(milliseconds: 300);
 
   // Display name (from Firestore)
-  String _displayName = 'Nickname';
+  String _displayName = 'Username';
 
   // Toggle for emulator convenience: disable location streaming if emulator is unstable
   bool _enableLocationStream = true;
@@ -74,7 +74,7 @@ class _PasaheroHomeState extends State<PasaheroHome>
           final role = (data['role'] ?? 'pasahero').toString().toLowerCase();
           if (role == 'pasahero') {
             setState(() {
-              _displayName = (data['nickName'] ?? 'Nickname') as String;
+              _displayName = (data['userName'] ?? 'Username') as String;
             });
           } else if (role == 'tsuperhero') {
             setState(() {
@@ -82,7 +82,7 @@ class _PasaheroHomeState extends State<PasaheroHome>
             });
           } else {
             setState(() {
-              _displayName = (data['nickName'] ?? 'Nickname') as String;
+              _displayName = (data['userName'] ?? 'Username') as String;
             });
           }
         }

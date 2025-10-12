@@ -8,14 +8,14 @@ import 'package:cloud_firestore/cloud_firestore.dart';
 class SignupStep2 extends StatefulWidget {
   final String firstName;
   final String lastName;
-  final String nickName;
+  final String userName;
   final DateTime dob;
 
   const SignupStep2({
     super.key,
     required this.firstName,
     required this.lastName,
-    required this.nickName,
+    required this.userName,
     required this.dob,
   });
 
@@ -59,7 +59,7 @@ class _SignupStep2State extends State<SignupStep2> {
         password: password,
         firstName: widget.firstName,
         lastName: widget.lastName,
-        nickName: widget.nickName.isEmpty ? null : widget.nickName,
+        userName: widget.userName,
         dob: widget.dob,
       );
 
