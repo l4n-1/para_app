@@ -1,8 +1,8 @@
 import 'dart:math';
 
 import 'package:flutter/material.dart';
-import 'package:para2/pages/pasaheroverification.dart';
-import 'package:para2/pages/tsuperheroverification.dart';
+import 'package:para2/pages/home/pasa/pasaheroverification.dart';
+import 'package:para2/pages/home/tsuper/tsuperheroverification.dart';
 
 class RolePick extends StatelessWidget {
   const RolePick({super.key});

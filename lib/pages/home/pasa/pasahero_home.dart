@@ -5,7 +5,7 @@ import 'package:google_maps_flutter/google_maps_flutter.dart';
 import 'package:geolocator/geolocator.dart';
 import 'package:firebase_auth/firebase_auth.dart';
 import 'package:cloud_firestore/cloud_firestore.dart';
-import 'package:para2/pages/login.dart';
+import 'package:para2/pages/login/login.dart';
 
 class PasaheroHome extends StatefulWidget {
   const PasaheroHome({super.key});
@@ -53,10 +53,10 @@ class _PasaheroHomeState extends State<PasaheroHome>
       vsync: this,
       duration: _panelAnimDuration,
     );
-    _panelOffset = Tween<Offset>(
-      begin: const Offset(-1.0, 0.0),
-      end: Offset.zero,
-    ).animate(CurvedAnimation(parent: _panelController, curve: Curves.easeInOut));
+    _panelOffset =
+        Tween<Offset>(begin: const Offset(-1.0, 0.0), end: Offset.zero).animate(
+          CurvedAnimation(parent: _panelController, curve: Curves.easeInOut),
+        );
 
     // Start tasks
     _initLocationAndMap();
@@ -140,35 +140,38 @@ class _PasaheroHomeState extends State<PasaheroHome>
     // Subscribe to position updates (guard against emulator/Play Services issues)
     if (_enableLocationStream) {
       try {
-        _positionSub = Geolocator.getPositionStream(
-          locationSettings: locationSettings,
-        ).listen(
+        _positionSub =
+            Geolocator.getPositionStream(
+              locationSettings: locationSettings,
+            ).listen(
               (Position p) async {
-            try {
-              final latlng = LatLng(p.latitude, p.longitude);
-              _updateUserLocation(latlng);
-              if (_mapReady && _mapController.isCompleted) {
-                final controller = await _mapController.future;
-                controller.animateCamera(CameraUpdate.newLatLng(latlng));
-              }
-            } catch (inner) {
-              debugPrint('Error during position update handling: $inner');
-            }
-          },
-          onError: (err) {
-            debugPrint('Position stream error: $err');
-          },
-          cancelOnError: true,
-        );
+                try {
+                  final latlng = LatLng(p.latitude, p.longitude);
+                  _updateUserLocation(latlng);
+                  if (_mapReady && _mapController.isCompleted) {
+                    final controller = await _mapController.future;
+                    controller.animateCamera(CameraUpdate.newLatLng(latlng));
+                  }
+                } catch (inner) {
+                  debugPrint('Error during position update handling: $inner');
+                }
+              },
+              onError: (err) {
+                debugPrint('Position stream error: $err');
+              },
+              cancelOnError: true,
+            );
       } catch (e, st) {
         debugPrint(
-            'Failed to start position stream (likely emulator/Play Services issue): $e\n$st');
+          'Failed to start position stream (likely emulator/Play Services issue): $e\n$st',
+        );
         _positionSub?.cancel();
         _positionSub = null;
       }
     } else {
       debugPrint(
-          'Location streaming disabled via _enableLocationStream flag (useful for emulator).');
+        'Location streaming disabled via _enableLocationStream flag (useful for emulator).',
+      );
     }
   }
 
@@ -199,9 +202,9 @@ class _PasaheroHomeState extends State<PasaheroHome>
   Future<void> _handleSignOut() async {
     await FirebaseAuth.instance.signOut();
     if (!mounted) return;
-    Navigator.of(context).pushReplacement(
-      MaterialPageRoute(builder: (_) => const LoginPage()),
-    );
+    Navigator.of(
+      context,
+    ).pushReplacement(MaterialPageRoute(builder: (_) => const LoginPage()));
   }
 
   @override
@@ -254,24 +257,33 @@ class _PasaheroHomeState extends State<PasaheroHome>
                     onTap: _togglePanel,
                     child: Container(
                       padding: const EdgeInsets.symmetric(
-                          horizontal: 12, vertical: 8),
+                        horizontal: 12,
+                        vertical: 8,
+                      ),
                       decoration: BoxDecoration(
                         color: Colors.white.withOpacity(0.95),
                         borderRadius: BorderRadius.circular(12),
                         boxShadow: [
                           BoxShadow(
-                              color: Colors.black.withOpacity(0.08),
-                              blurRadius: 6),
+                            color: Colors.black.withOpacity(0.08),
+                            blurRadius: 6,
+                          ),
                         ],
                       ),
                       child: Row(
                         children: [
-                          const Icon(Icons.person, size: 18, color: Colors.black54),
+                          const Icon(
+                            Icons.person,
+                            size: 18,
+                            color: Colors.black54,
+                          ),
                           const SizedBox(width: 8),
                           Text(
                             _displayName,
                             style: const TextStyle(
-                                fontSize: 14, fontWeight: FontWeight.w600),
+                              fontSize: 14,
+                              fontWeight: FontWeight.w600,
+                            ),
                           ),
                         ],
                       ),
@@ -331,8 +343,10 @@ class _PasaheroHomeState extends State<PasaheroHome>
               // Header / Profile area
               Container(
                 width: double.infinity,
-                padding:
-                const EdgeInsets.symmetric(horizontal: 18, vertical: 20),
+                padding: const EdgeInsets.symmetric(
+                  horizontal: 18,
+                  vertical: 20,
+                ),
                 decoration: BoxDecoration(
                   color: Colors.grey[100],
                   borderRadius: const BorderRadius.only(
@@ -345,7 +359,11 @@ class _PasaheroHomeState extends State<PasaheroHome>
                     CircleAvatar(
                       radius: 28,
                       backgroundColor: Colors.grey[300],
-                      child: const Icon(Icons.person, color: Colors.white, size: 28),
+                      child: const Icon(
+                        Icons.person,
+                        color: Colors.white,
+                        size: 28,
+                      ),
                     ),
                     const SizedBox(width: 12),
                     Flexible(
@@ -356,14 +374,19 @@ class _PasaheroHomeState extends State<PasaheroHome>
                           Text(
                             _displayName,
                             style: const TextStyle(
-                                fontWeight: FontWeight.bold, fontSize: 16),
+                              fontWeight: FontWeight.bold,
+                              fontSize: 16,
+                            ),
                             maxLines: 1,
                             overflow: TextOverflow.ellipsis,
                           ),
                           const SizedBox(height: 4),
                           const Text(
                             'Member since 2024',
-                            style: TextStyle(color: Colors.black54, fontSize: 12),
+                            style: TextStyle(
+                              color: Colors.black54,
+                              fontSize: 12,
+                            ),
                           ),
                         ],
                       ),
@@ -422,7 +445,10 @@ class _PasaheroHomeState extends State<PasaheroHome>
                   children: [
                     Image.asset('assets/Paralogotemp.png', height: 48),
                     const SizedBox(height: 8),
-                    const Text('PARA!', style: TextStyle(color: Colors.black54)),
+                    const Text(
+                      'PARA!',
+                      style: TextStyle(color: Colors.black54),
+                    ),
                   ],
                 ),
               ),

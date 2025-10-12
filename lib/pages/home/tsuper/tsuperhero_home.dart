@@ -5,7 +5,7 @@ import 'package:google_maps_flutter/google_maps_flutter.dart';
 import 'package:geolocator/geolocator.dart';
 import 'package:firebase_auth/firebase_auth.dart';
 import 'package:cloud_firestore/cloud_firestore.dart';
-import 'package:para2/pages/login.dart';
+import 'package:para2/pages/login/login.dart';
 
 class TsuperheroHome extends StatefulWidget {
   const TsuperheroHome({super.key});
@@ -45,12 +45,10 @@ class _TsuperheroHomeState extends State<TsuperheroHome>
       vsync: this,
       duration: _panelAnimDuration,
     );
-    _panelOffset = Tween<Offset>(
-      begin: const Offset(-1.0, 0.0),
-      end: Offset.zero,
-    ).animate(
-      CurvedAnimation(parent: _panelController, curve: Curves.easeInOut),
-    );
+    _panelOffset =
+        Tween<Offset>(begin: const Offset(-1.0, 0.0), end: Offset.zero).animate(
+          CurvedAnimation(parent: _panelController, curve: Curves.easeInOut),
+        );
 
     _initLocationAndMap();
     _loadPlateNumber();
@@ -107,16 +105,15 @@ class _TsuperheroHomeState extends State<TsuperheroHome>
     }
 
     if (_enableLocationStream) {
-      _positionSub = Geolocator.getPositionStream(
-        locationSettings: settings,
-      ).listen((pos) async {
-        final latlng = LatLng(pos.latitude, pos.longitude);
-        _updateDriverMarker(latlng);
-        if (_mapReady && _mapController.isCompleted) {
-          final controller = await _mapController.future;
-          controller.animateCamera(CameraUpdate.newLatLng(latlng));
-        }
-      });
+      _positionSub = Geolocator.getPositionStream(locationSettings: settings)
+          .listen((pos) async {
+            final latlng = LatLng(pos.latitude, pos.longitude);
+            _updateDriverMarker(latlng);
+            if (_mapReady && _mapController.isCompleted) {
+              final controller = await _mapController.future;
+              controller.animateCamera(CameraUpdate.newLatLng(latlng));
+            }
+          });
     }
   }
 
@@ -145,9 +142,9 @@ class _TsuperheroHomeState extends State<TsuperheroHome>
   Future<void> _handleSignOut() async {
     await FirebaseAuth.instance.signOut();
     if (!mounted) return;
-    Navigator.of(context).pushReplacement(
-      MaterialPageRoute(builder: (_) => const LoginPage()),
-    );
+    Navigator.of(
+      context,
+    ).pushReplacement(MaterialPageRoute(builder: (_) => const LoginPage()));
   }
 
   @override
@@ -189,20 +186,26 @@ class _TsuperheroHomeState extends State<TsuperheroHome>
                     onTap: _togglePanel,
                     child: Container(
                       padding: const EdgeInsets.symmetric(
-                          horizontal: 12, vertical: 8),
+                        horizontal: 12,
+                        vertical: 8,
+                      ),
                       decoration: BoxDecoration(
                         color: Colors.white,
                         borderRadius: BorderRadius.circular(12),
                         boxShadow: [
                           BoxShadow(
-                              color: Colors.black.withOpacity(0.08),
-                              blurRadius: 6)
+                            color: Colors.black.withOpacity(0.08),
+                            blurRadius: 6,
+                          ),
                         ],
                       ),
                       child: Row(
                         children: [
-                          const Icon(Icons.directions_bus,
-                              size: 18, color: Colors.black54),
+                          const Icon(
+                            Icons.directions_bus,
+                            size: 18,
+                            color: Colors.black54,
+                          ),
                           const SizedBox(width: 8),
                           Text(
                             _plateNumber,
@@ -265,8 +268,10 @@ class _TsuperheroHomeState extends State<TsuperheroHome>
                   );
                 },
                 style: ElevatedButton.styleFrom(
-                  padding:
-                  const EdgeInsets.symmetric(horizontal: 40, vertical: 14),
+                  padding: const EdgeInsets.symmetric(
+                    horizontal: 40,
+                    vertical: 14,
+                  ),
                   shape: RoundedRectangleBorder(
                     borderRadius: BorderRadius.circular(30),
                   ),
@@ -295,8 +300,10 @@ class _TsuperheroHomeState extends State<TsuperheroHome>
               // Header
               Container(
                 width: double.infinity,
-                padding:
-                const EdgeInsets.symmetric(horizontal: 18, vertical: 20),
+                padding: const EdgeInsets.symmetric(
+                  horizontal: 18,
+                  vertical: 20,
+                ),
                 decoration: BoxDecoration(
                   color: Colors.grey[100],
                   borderRadius: const BorderRadius.only(
@@ -308,8 +315,11 @@ class _TsuperheroHomeState extends State<TsuperheroHome>
                     CircleAvatar(
                       radius: 28,
                       backgroundColor: Colors.grey[300],
-                      child: const Icon(Icons.directions_bus,
-                          color: Colors.white, size: 28),
+                      child: const Icon(
+                        Icons.directions_bus,
+                        color: Colors.white,
+                        size: 28,
+                      ),
                     ),
                     const SizedBox(width: 12),
                     Flexible(
@@ -326,7 +336,10 @@ class _TsuperheroHomeState extends State<TsuperheroHome>
                           const SizedBox(height: 4),
                           const Text(
                             'Active Driver',
-                            style: TextStyle(color: Colors.black54, fontSize: 12),
+                            style: TextStyle(
+                              color: Colors.black54,
+                              fontSize: 12,
+                            ),
                           ),
                         ],
                       ),
@@ -366,8 +379,10 @@ class _TsuperheroHomeState extends State<TsuperheroHome>
                   children: [
                     Image.asset('assets/Paralogotemp.png', height: 48),
                     const SizedBox(height: 8),
-                    const Text('PARA! - TsuperHero',
-                        style: TextStyle(color: Colors.black54)),
+                    const Text(
+                      'PARA! - TsuperHero',
+                      style: TextStyle(color: Colors.black54),
+                    ),
                   ],
                 ),
               ),

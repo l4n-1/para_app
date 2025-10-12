@@ -3,9 +3,9 @@ import 'package:flutter/material.dart';
 import 'package:firebase_core/firebase_core.dart';
 import 'package:firebase_auth/firebase_auth.dart';
 import 'package:cloud_firestore/cloud_firestore.dart';
-import 'package:para2/pages/login.dart';
-import 'package:para2/pages/pasahero_home.dart';
-import 'package:para2/pages/tsuperhero_home.dart';
+import 'package:para2/pages/login/login.dart';
+import 'package:para2/pages/home/pasa/pasahero_home.dart';
+import "package:para2/pages/home/tsuper/tsuperhero_home.dart";
 
 void main() async {
   WidgetsFlutterBinding.ensureInitialized();
@@ -48,10 +48,7 @@ class MyApp extends StatelessWidget {
     return MaterialApp(
       title: 'PARA!',
       debugShowCheckedModeBanner: false,
-      theme: ThemeData(
-        useMaterial3: true,
-        colorSchemeSeed: Colors.blue,
-      ),
+      theme: ThemeData(useMaterial3: true, colorSchemeSeed: Colors.blue),
       home: FutureBuilder<Widget>(
         future: _decideStartPage(),
         builder: (context, snapshot) {
@@ -75,9 +72,7 @@ class MyApp extends StatelessWidget {
           }
           if (snapshot.hasError) {
             return Scaffold(
-              body: Center(
-                child: Text('Error: ${snapshot.error}'),
-              ),
+              body: Center(child: Text('Error: ${snapshot.error}')),
             );
           }
           return snapshot.data!;
