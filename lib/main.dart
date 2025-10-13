@@ -1,4 +1,3 @@
-// lib/main.dart
 import 'package:flutter/material.dart';
 import 'package:firebase_core/firebase_core.dart';
 import 'package:firebase_auth/firebase_auth.dart';
@@ -21,24 +20,53 @@ class MyApp extends StatelessWidget {
     final firestore = FirebaseFirestore.instance;
     final user = auth.currentUser;
 
+    FirebaseAuth.instance.authStateChanges().listen((User? user) {
+      if (user == null) {
+        debugPrint('User signed out or deleted, returning to login.');
+      }
+    });
+
     // Not logged in → go to login
     if (user == null) return const LoginPage();
 
-    // Logged in but email not verified → back to login
-    await user.reload();
-    if (!user.emailVerified) return const LoginPage();
-
-    // Logged in + verified → check role
     try {
-      final doc = await firestore.collection('users').doc(user.uid).get();
-      if (!doc.exists) return const LoginPage();
+      // Reload to make sure user still exists in Firebase
+      await user.reload();
+      final refreshedUser = auth.currentUser;
+
+      // If user was deleted or null after reload → log out and redirect
+      if (refreshedUser == null) {
+        await auth.signOut();
+        return const LoginPage();
+      }
+
+      if (!refreshedUser.emailVerified) return const LoginPage();
+
+      // Check Firestore document for role
+      final doc = await firestore
+          .collection('users')
+          .doc(refreshedUser.uid)
+          .get();
+      if (!doc.exists) {
+        await auth.signOut();
+        return const LoginPage();
+      }
 
       final data = doc.data()!;
       final role = (data['role'] ?? 'pasahero').toString().toLowerCase();
       if (role == 'tsuperhero') return const TsuperheroHome();
       return const PasaheroHome();
+    } on FirebaseAuthException catch (e) {
+      if (e.code == 'user-not-found' || e.code == 'invalid-user-token') {
+        // Handle the case where the user no longer exists
+        await auth.signOut();
+        return const LoginPage();
+      }
+      debugPrint('FirebaseAuth error: ${e.message}');
+      return const LoginPage();
     } catch (e) {
       debugPrint('Error loading role: $e');
+      await auth.signOut();
       return const LoginPage();
     }
   }
