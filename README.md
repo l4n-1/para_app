@@ -38,7 +38,7 @@
 
 ## [COMMIT-10/13/2025-Leo]
 ### Added
-- Email verification popup during sign-up. Checks for verification in real-time and directs User to pasahero_home after.
+- Email verification pop-up during sign-up. Checks for verification in real-time and directs User to pasahero_home after.
 - Settings integration placeholder (Settings->settingspage(scaffold), PHsettings(Widgets), THsettings(Widgets))
 
 ### Fixed 
@@ -52,4 +52,42 @@
 - Login page appears longer on real devices compared to emulator view — “Create Account” button partially off-screen.
 - Google Maps not working on real device (probably devKey missing on my end).
 
+## [COMMIT-10/13/2025-Bonus]
+✅ Added
+- Implemented Tsuperhero Activation Flow (tsuperhero_activation.dart)
+  → QR scanning now routes user based on login state:
+  - Logged-in users → PlateNumberInputPage
+  - New users → SignupTsuperhero
+- Enhanced SignupStep2 (Pasahero registration)
+  → Added contact number (PH format: 09XXXXXXXXX)
+  → Added password validation (min 8 chars, 1 uppercase, 1 number)
+  → Retained email verification popup + real-time verification redirect
+- Updated LoginPage
+  → Supports login using either email OR username
+  → Redirects automatically based on user role (pasahero/tsuperhero)
 
+🛠️ Fixed
+- Confirmed the added email verification pop-up during sign-up working. Improvised a bypass code for the firebase to not
+  actually send an email verification to prevent pop-ups of "Blocked due to unusual activity" but reverted things back to
+  normal before pushing.
+- Resolved null-safety issues in QR scanning flow
+- Adjusted pasahero_home.dart layout to fix map overflow
+- Patched deprecated 'desiredAccuracy' calls
+- Verified email verification and redirect flow
+- Confirmed auto-login redirect works for verified users
+
+🚧 In Progress
+- SignupTsuperhero page (plate + contact + password)
+- Jeepney marker rotation + Firestore tracking
+- Google Maps API verification on real devices
+- Settings page styling (Leo)
+
+⚠️ Known Issues
+- Firebase “Blocked due to unusual activity” (temporary bypass)
+- Google Maps may fail on real device without proper API key
+- Minor login UI clipping on small screens
+
+### P.S.
+- I am changing the minSdk to 23 everytime I will run the app since my emulator is not compatible whenever I pull it
+  from repo. Just revert it back if same issue applies to you too. It can be found on android/app/build.gradle.kts under
+  "defaultConfig {"

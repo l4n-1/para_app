@@ -10,22 +10,23 @@ plugins {
 
 android {
     namespace = "com.example.para2"
-    compileSdk = flutter.compileSdkVersion
+    compileSdk = 35
     ndkVersion = "27.0.12077973"
 
     compileOptions {
-        sourceCompatibility = JavaVersion.VERSION_11
-        targetCompatibility = JavaVersion.VERSION_11
+        sourceCompatibility = JavaVersion.VERSION_1_8
+        targetCompatibility = JavaVersion.VERSION_1_8
+        isCoreLibraryDesugaringEnabled = true
     }
 
     kotlinOptions {
-        jvmTarget = JavaVersion.VERSION_11.toString()
+        jvmTarget = "1.8"
     }
 
     defaultConfig {
         applicationId = "com.example.para2"
-        minSdk = flutter.minSdkVersion
-        targetSdk = flutter.targetSdkVersion
+        minSdk = 23
+        targetSdk = 34
         versionCode = flutter.versionCode
         versionName = flutter.versionName
     }
@@ -47,7 +48,8 @@ dependencies {
 
     // ✅ Firebase core dependencies
     implementation("com.google.firebase:firebase-analytics")
-
+    implementation("org.jetbrains.kotlin:kotlin-stdlib:1.9.23")
+    coreLibraryDesugaring("com.android.tools:desugar_jdk_libs:2.0.3")
     // ✅ Add these if you use them in Flutter:
     // implementation("com.google.firebase:firebase-auth")
     // implementation("com.google.firebase:firebase-firestore")

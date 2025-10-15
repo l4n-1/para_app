@@ -1,4 +1,4 @@
-// lib/pages/signup_step2.dart
+// lib/pages/login/signup_step2.dart
 import 'dart:async';
 import 'package:flutter/material.dart';
 import 'package:firebase_auth/firebase_auth.dart';
@@ -25,8 +25,9 @@ class SignupStep2 extends StatefulWidget {
   State<SignupStep2> createState() => _SignupStep2State();
 }
 
-class _SignupStep2State extends State<SignupStep2> {
+class _SignupStep2State extends State<SignupStep2> with SingleTickerProviderStateMixin {
   final _emailController = TextEditingController();
+  final _contactController = TextEditingController();
   final _passwordController = TextEditingController();
   final _confirmPasswordController = TextEditingController();
   final _firestore = FirebaseFirestore.instance;
@@ -34,25 +35,72 @@ class _SignupStep2State extends State<SignupStep2> {
   bool _isLoading = false;
   Timer? _emailCheckTimer;
 
+  late AnimationController _shakeController;
+  late Animation<double> _shakeAnimation;
+
+  final RegExp _passwordRegex = RegExp(r'^(?=.*[A-Z])(?=.*\d).{8,}$');
+  final RegExp _phContactRegex = RegExp(r'^09\d{9}$');
+
+  @override
+  void initState() {
+    super.initState();
+    _shakeController = AnimationController(
+      duration: const Duration(milliseconds: 400),
+      vsync: this,
+    );
+    _shakeAnimation = Tween<double>(begin: 0, end: 10)
+        .chain(CurveTween(curve: Curves.elasticIn))
+        .animate(_shakeController);
+  }
+
+  @override
+  void dispose() {
+    _emailCheckTimer?.cancel();
+    _shakeController.dispose();
+    _emailController.dispose();
+    _contactController.dispose();
+    _passwordController.dispose();
+    _confirmPasswordController.dispose();
+    super.dispose();
+  }
+
+  void _triggerShake() {
+    _shakeController.forward(from: 0);
+  }
+
   Future<void> _signUp() async {
     final email = _emailController.text.trim();
+    final contact = _contactController.text.trim();
     final password = _passwordController.text;
     final confirmPassword = _confirmPasswordController.text;
 
-    if (email.isEmpty || password.isEmpty || confirmPassword.isEmpty) {
+    if (email.isEmpty || contact.isEmpty || password.isEmpty || confirmPassword.isEmpty) {
       _showSnackBar('Please fill in all fields');
+      _triggerShake();
+      return;
+    }
+
+    if (!_phContactRegex.hasMatch(contact)) {
+      _showSnackBar('Please enter a valid Philippine contact number (09XXXXXXXXX).');
+      _triggerShake();
       return;
     }
 
     if (password != confirmPassword) {
       _showSnackBar('Passwords do not match');
+      _triggerShake();
+      return;
+    }
+
+    if (!_passwordRegex.hasMatch(password)) {
+      _showSnackBar('Password must be at least 8 chars, with 1 uppercase and 1 number.');
+      _triggerShake();
       return;
     }
 
     setState(() => _isLoading = true);
 
     try {
-      // Use your AuthService wrapper
       final userCredential = await AuthService().signUpWithEmail(
         email: email,
         password: password,
@@ -65,16 +113,19 @@ class _SignupStep2State extends State<SignupStep2> {
       final user = userCredential.user!;
       await _firestore.collection('users').doc(user.uid).set({
         'role': widget is TsuperheroSignupPage ? 'tsuperhero' : 'pasahero',
+        'contact': contact,
+        'email': email,
       }, SetOptions(merge: true));
 
       await user.sendEmailVerification();
-
-      // Show the loading popup while checking for verification
       _showVerificationDialog(user);
+
     } on FirebaseAuthException catch (e) {
       _showSnackBar('Sign up failed: ${e.message}');
+      _triggerShake();
     } catch (e) {
       _showSnackBar('Sign up failed: $e');
+      _triggerShake();
     } finally {
       setState(() => _isLoading = false);
     }
@@ -86,19 +137,14 @@ class _SignupStep2State extends State<SignupStep2> {
       barrierDismissible: false,
       barrierColor: Colors.black.withOpacity(0.6),
       builder: (_) {
-        // Check every 3 seconds for email verification
-        _emailCheckTimer = Timer.periodic(const Duration(seconds: 3), (
-          _,
-        ) async {
+        _emailCheckTimer = Timer.periodic(const Duration(seconds: 3), (_) async {
           await user.reload();
           final refreshedUser = FirebaseAuth.instance.currentUser;
 
           if (refreshedUser != null && refreshedUser.emailVerified) {
             _emailCheckTimer?.cancel();
+            if (mounted) Navigator.of(context).pop();
 
-            if (mounted) Navigator.of(context).pop(); // Close popup
-
-            // Redirect directly to home
             Navigator.pushReplacement(
               context,
               MaterialPageRoute(
@@ -108,7 +154,6 @@ class _SignupStep2State extends State<SignupStep2> {
           }
         });
 
-        // Actual popup
         return Center(
           child: Container(
             padding: const EdgeInsets.all(30),
@@ -127,9 +172,7 @@ class _SignupStep2State extends State<SignupStep2> {
             child: const Column(
               mainAxisSize: MainAxisSize.min,
               children: [
-                CircularProgressIndicator(
-                  color: Color.fromARGB(255, 73, 172, 123),
-                ),
+                CircularProgressIndicator(color: Color.fromARGB(255, 73, 172, 123)),
                 SizedBox(height: 20),
                 Text(
                   "Verifying...\nCheck your email.",
@@ -145,9 +188,7 @@ class _SignupStep2State extends State<SignupStep2> {
   }
 
   void _showSnackBar(String message) {
-    ScaffoldMessenger.of(
-      context,
-    ).showSnackBar(SnackBar(content: Text(message)));
+    ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text(message)));
   }
 
   InputDecoration _inputDecoration(String hintText) {
@@ -161,15 +202,6 @@ class _SignupStep2State extends State<SignupStep2> {
       fillColor: Colors.grey[200],
       contentPadding: const EdgeInsets.symmetric(horizontal: 20, vertical: 16),
     );
-  }
-
-  @override
-  void dispose() {
-    _emailCheckTimer?.cancel();
-    _emailController.dispose();
-    _passwordController.dispose();
-    _confirmPasswordController.dispose();
-    super.dispose();
   }
 
   @override
@@ -193,26 +225,47 @@ class _SignupStep2State extends State<SignupStep2> {
               Image.asset('assets/Paralogotemp.png', height: 150, width: 150),
               const SizedBox(height: 40),
 
-              // Email
-              TextField(
-                controller: _emailController,
-                decoration: _inputDecoration('Email'),
-              ),
-              const SizedBox(height: 10),
+              // Animated wrapper for email field
+              AnimatedBuilder(
+                animation: _shakeAnimation,
+                builder: (context, child) {
+                  return Transform.translate(
+                    offset: Offset(_shakeAnimation.value, 0),
+                    child: child,
+                  );
+                },
+                child: Column(
+                  children: [
+                    TextField(
+                      controller: _emailController,
+                      decoration: _inputDecoration('Email'),
+                    ),
+                    const SizedBox(height: 10),
 
-              // Password
-              TextField(
-                controller: _passwordController,
-                obscureText: true,
-                decoration: _inputDecoration('Password'),
-              ),
-              const SizedBox(height: 10),
+                    // Contact Number
+                    TextField(
+                      controller: _contactController,
+                      keyboardType: TextInputType.phone,
+                      decoration: _inputDecoration('Contact Number (09XXXXXXXXX)'),
+                    ),
+                    const SizedBox(height: 10),
 
-              // Confirm Password
-              TextField(
-                controller: _confirmPasswordController,
-                obscureText: true,
-                decoration: _inputDecoration('Confirm Password'),
+                    // Password
+                    TextField(
+                      controller: _passwordController,
+                      obscureText: true,
+                      decoration: _inputDecoration('Password'),
+                    ),
+                    const SizedBox(height: 10),
+
+                    // Confirm Password
+                    TextField(
+                      controller: _confirmPasswordController,
+                      obscureText: true,
+                      decoration: _inputDecoration('Confirm Password'),
+                    ),
+                  ],
+                ),
               ),
               const SizedBox(height: 30),
 
@@ -230,9 +283,9 @@ class _SignupStep2State extends State<SignupStep2> {
                   child: _isLoading
                       ? const CircularProgressIndicator(color: Colors.white)
                       : const Text(
-                          'Sign Up',
-                          style: TextStyle(color: Colors.black, fontSize: 16),
-                        ),
+                    'Sign Up',
+                    style: TextStyle(color: Colors.black, fontSize: 16),
+                  ),
                 ),
               ),
               const SizedBox(height: 40),
