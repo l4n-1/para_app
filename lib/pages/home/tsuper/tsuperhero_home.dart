@@ -4,6 +4,7 @@ import 'package:firebase_auth/firebase_auth.dart';
 import 'package:cloud_firestore/cloud_firestore.dart';
 import 'package:para2/pages/login/login.dart';
 import 'package:para2/pages/home/shared_home.dart';
+import 'package:para2/pages/settings/profile_settings.dart';
 
 class TsuperheroHome extends StatefulWidget {
   const TsuperheroHome({super.key});
@@ -17,6 +18,7 @@ class _TsuperheroHomeState extends State<TsuperheroHome> {
   final FirebaseFirestore _firestore = FirebaseFirestore.instance;
 
   String _plateNumber = 'DRVR-XXX';
+  bool _isOnline = false;
 
   @override
   void initState() {
@@ -41,7 +43,7 @@ class _TsuperheroHomeState extends State<TsuperheroHome> {
   }
 
   Future<void> _handleSignOut() async {
-    await FirebaseAuth.instance.signOut();
+    await _auth.signOut();
     if (!mounted) return;
     Navigator.pushReplacement(
       context,
@@ -49,38 +51,60 @@ class _TsuperheroHomeState extends State<TsuperheroHome> {
     );
   }
 
-  @override
-  Widget build(BuildContext context) {
-    return SharedHome(
-      roleLabel: 'TSUPERHERO',
-      onSignOut: _handleSignOut,
-      roleContent: _buildDriverContent(),
-      roleMenu: _buildDriverMenu(),
-    );
+  void _toggleOnlineStatus() async {
+    setState(() => _isOnline = !_isOnline);
+
+    try {
+      final user = _auth.currentUser;
+      if (user != null) {
+        await _firestore.collection('users').doc(user.uid).update({
+          'isOnline': _isOnline,
+          'lastStatusChange': FieldValue.serverTimestamp(),
+        });
+      }
+
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(
+          content: Text(
+            _isOnline
+                ? '🟢 You are now ONLINE'
+                : '🔴 You are now OFFLINE',
+          ),
+          duration: const Duration(seconds: 2),
+        ),
+      );
+    } catch (e) {
+      debugPrint('Error updating online status: $e');
+    }
   }
 
-  /// 🚌 Main driver area (inside map area)
+  /// 🚌 Main driver action button
   Widget _buildDriverContent() {
     return Align(
       alignment: Alignment.bottomCenter,
       child: Padding(
         padding: const EdgeInsets.only(bottom: 40.0),
         child: ElevatedButton.icon(
-          onPressed: () {
-            ScaffoldMessenger.of(
-              context,
-            ).showSnackBar(const SnackBar(content: Text('Go Online tapped!')));
-          },
+          onPressed: _toggleOnlineStatus,
           style: ElevatedButton.styleFrom(
+            backgroundColor:
+            _isOnline ? Colors.redAccent : const Color.fromARGB(255, 73, 172, 123),
             padding: const EdgeInsets.symmetric(horizontal: 40, vertical: 14),
             shape: RoundedRectangleBorder(
               borderRadius: BorderRadius.circular(30),
             ),
           ),
-          icon: const Icon(Icons.power_settings_new),
-          label: const Text(
-            'Go Online',
-            style: TextStyle(fontWeight: FontWeight.bold, fontSize: 16),
+          icon: Icon(
+            _isOnline ? Icons.power_settings_new : Icons.play_arrow,
+            color: Colors.white,
+          ),
+          label: Text(
+            _isOnline ? 'Go Offline' : 'Go Online',
+            style: const TextStyle(
+              fontWeight: FontWeight.bold,
+              fontSize: 16,
+              color: Colors.white,
+            ),
           ),
         ),
       ),
@@ -94,7 +118,7 @@ class _TsuperheroHomeState extends State<TsuperheroHome> {
         leading: const Icon(Icons.qr_code_scanner),
         title: const Text('Scan Activation QR'),
         onTap: () {
-          // TODO: implement QR activation
+          // Future improvement: Navigate to QR activation screen
         },
       ),
       ListTile(
@@ -103,10 +127,30 @@ class _TsuperheroHomeState extends State<TsuperheroHome> {
         onTap: () {},
       ),
       ListTile(
+        leading: const Icon(Icons.person),
+        title: const Text('Profile Settings'),
+        onTap: () {
+          Navigator.push(
+            context,
+            MaterialPageRoute(builder: (_) => const ProfileSettingsPage()),
+          );
+        },
+      ),
+      ListTile(
         leading: const Icon(Icons.settings),
-        title: const Text('Settings'),
+        title: const Text('App Settings'),
         onTap: () {},
       ),
     ];
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    return SharedHome(
+      roleLabel: 'TSUPERHERO',
+      onSignOut: _handleSignOut,
+      roleContent: _buildDriverContent(),
+      roleMenu: _buildDriverMenu(),
+    );
   }
 }

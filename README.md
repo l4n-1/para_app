@@ -1,5 +1,27 @@
 # 📝 Changelog
 
+## [COMMIT-10/15/2025-Bonus]
+### Added
+- Location permission and error handling in shared_home.dart to prevent white screen when GPS is off or unavailable.
+- Profile Settings page (profile_settings.dart) where Pasahero and Tsuperhero users can update username, contact number, and date of birth.
+- “Profile Settings” button added in side panel for both user roles.
+- QR validation logic via Firebase Realtime Database to ensure scanned QR codes are valid and not reused.
+- Updated plate_number_input.dart to mark device IDs as assigned after activation.
+
+### Fixed
+- Updated auth_service.dart for compatibility with google_sign_in: ^7.1.1.
+  - Replaced deprecated signIn() and signInSilently() with authenticate().
+  - Removed accessToken and added initialize() / disconnect() methods.
+- Cleaned deprecated warnings (withOpacity, unused vars) and async gap issues in shared_home.dart.
+- Improved role-based display names in SharedHome (Pasahero = firstName, Tsuperhero = plateNumber).
+
+### Known Issues
+- Google users without complete profile info (username/contact/DOB) still need automatic redirect to Profile Setup.
+- Firebase pop-up “Blocked due to unusual activity” may still occur during verification.
+- Google Maps API may fail on real devices if SHA key is missing.
+- Tsuperhero “Go Online” button not yet connected to backend route system.
+
+
 ## [COMMIT-10/15/2025-Leo]
 ### Added
 - RoleRouter page to identify if the signed up account is a tsuperhero/pasahero.
@@ -86,8 +108,3 @@
 - Firebase “Blocked due to unusual activity” (temporary bypass)
 - Google Maps may fail on real device without proper API key
 - Minor login UI clipping on small screens
-
-### P.S.
-- I am changing the minSdk to 23 everytime I will run the app since my emulator is not compatible whenever I pull it
-  from repo. Just revert it back if same issue applies to you too. It can be found on android/app/build.gradle.kts under
-  "defaultConfig {"

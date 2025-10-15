@@ -4,15 +4,15 @@ import 'package:google_maps_flutter/google_maps_flutter.dart';
 import 'package:geolocator/geolocator.dart';
 import 'package:firebase_auth/firebase_auth.dart';
 import 'package:cloud_firestore/cloud_firestore.dart';
+import 'package:para2/pages/settings/profile_settings.dart';
 
-/// SharedHome — A unified layout for both Pasahero and Tsuperhero.
-/// Handles map, user location, top bar, and slide panel.
-/// Role-specific UI (content and menu) are passed from each role screen.
+/// SharedHome — unified layout for Pasahero and Tsuperhero.
+/// Shows Google Map, side panel, and handles role-specific overlays.
 class SharedHome extends StatefulWidget {
   final String roleLabel;
   final Future<void> Function()? onSignOut;
-  final Widget? roleContent; // driver/passenger overlay
-  final List<Widget>? roleMenu; // custom menu items
+  final Widget? roleContent;
+  final List<Widget>? roleMenu;
   final Widget Function(BuildContext context, String displayName)?
   roleContentBuilder;
 
@@ -33,10 +33,14 @@ class _SharedHomeState extends State<SharedHome> with TickerProviderStateMixin {
   final Completer<GoogleMapController> _mapController = Completer();
   final Map<MarkerId, Marker> _markers = {};
   StreamSubscription<Position>? _positionSub;
+  StreamSubscription<DocumentSnapshot>? _userListener;
 
   bool _mapReady = false;
   bool _isPanelOpen = false;
-  bool _enableLocationStream = true;
+  final bool _enableLocationStream = true;
+
+  bool _isProfileIncomplete = false;
+  bool _featuresLocked = false;
 
   late final AnimationController _panelController;
   late final Animation<Offset> _panelOffset;
@@ -57,72 +61,79 @@ class _SharedHomeState extends State<SharedHome> with TickerProviderStateMixin {
   void initState() {
     super.initState();
 
-    _loadDisplayName(); // ✅ only Firestore, never FirebaseAuth.displayName
-
-    // 🪟 Init panel animation
     _panelController = AnimationController(
       vsync: this,
       duration: _panelAnimDuration,
     );
 
-    _panelOffset =
-        Tween<Offset>(begin: const Offset(-1.0, 0.0), end: Offset.zero).animate(
-          CurvedAnimation(parent: _panelController, curve: Curves.easeInOut),
-        );
+    _panelOffset = Tween<Offset>(
+      begin: const Offset(-1.0, 0.0),
+      end: Offset.zero,
+    ).animate(
+      CurvedAnimation(parent: _panelController, curve: Curves.easeInOut),
+    );
 
+    _listenToUserData();
     _initLocationAndMap();
   }
 
-  Future<void> _loadDisplayName() async {
+  /// 🔁 Live Firestore listener for profile + display name updates
+  void _listenToUserData() {
     final user = _auth.currentUser;
-    if (user == null) {
-      debugPrint('⚠️ No user is currently logged in.');
-      return;
-    }
+    if (user == null) return;
 
-    try {
-      final docRef = _firestore.collection('users').doc(user.uid);
-      final doc = await docRef.get();
+    _userListener?.cancel();
+    _userListener =
+        _firestore.collection('users').doc(user.uid).snapshots().listen((doc) {
+          // ⚙️ simplified — .exists is never null
+          if (!doc.exists) return;
 
-      if (!doc.exists) {
-        debugPrint('⚠️ Firestore doc not found for user: ${user.uid}');
-        setState(() => _displayName = 'Unknown User');
-        return;
-      }
+          final data = doc.data() ?? {};
 
-      final data = doc.data()!;
-      debugPrint('📄 Firestore user data: $data');
+          final missingFields = [
+            if ((data['userName'] ?? '').toString().isEmpty) 'userName',
+            if ((data['contact'] ?? '').toString().isEmpty) 'contact',
+            if (data['dob'] == null) 'dob',
+          ];
 
-      final role = (data['role'] ?? 'pasahero').toString().toLowerCase();
-      String newDisplayName;
+          final isIncomplete = missingFields.isNotEmpty;
 
-      if (role == 'pasahero') {
-        newDisplayName = (data['firstName'] ?? 'Username') as String;
-      } else if (role == 'tsuperhero') {
-        newDisplayName = (data['plateNumber'] ?? 'DRVR XXX') as String;
-      } else {
-        newDisplayName = (data['firstName'] ?? 'Username') as String;
-      }
+          if (mounted) {
+            setState(() {
+              _isProfileIncomplete = isIncomplete;
+              _featuresLocked = isIncomplete;
 
-      debugPrint('✅ Setting displayName to: $newDisplayName');
-
-      setState(() {
-        _displayName = newDisplayName;
-      });
-    } catch (e) {
-      debugPrint('❌ Failed to load display name: $e');
-    }
+              final role = (data['role'] ?? 'pasahero').toString().toLowerCase();
+              if (role == 'pasahero') {
+                _displayName = (data['firstName'] ?? 'Username') as String;
+              } else if (role == 'tsuperhero') {
+                _displayName = (data['plateNumber'] ?? 'DRVR XXX') as String;
+              } else {
+                _displayName = (data['firstName'] ?? 'Username') as String;
+              }
+            });
+          }
+        });
   }
 
+  /// 🧭 Initialize map and location with proper user feedback
   Future<void> _initLocationAndMap() async {
     try {
       LocationPermission permission = await Geolocator.checkPermission();
       if (permission == LocationPermission.denied) {
         permission = await Geolocator.requestPermission();
       }
+
       if (permission == LocationPermission.deniedForever ||
           permission == LocationPermission.denied) {
-        debugPrint('❌ Location permission denied.');
+        if (!mounted) return;
+        _showLocationErrorDialog(
+          title: "Location Permission Denied",
+          message:
+          "PARA! needs location access to show your position.\nPlease enable location access in your device settings.",
+          openSettings: true,
+          retryPermission: true,
+        );
         return;
       }
 
@@ -131,34 +142,96 @@ class _SharedHomeState extends State<SharedHome> with TickerProviderStateMixin {
         distanceFilter: 5,
       );
 
-      final pos = await Geolocator.getCurrentPosition(
-        locationSettings: locationSettings,
-      );
+      Position pos;
+      try {
+        pos = await Geolocator.getCurrentPosition(
+          locationSettings: locationSettings,
+        );
+      } catch (_) {
+        if (!mounted) return;
+        _showLocationErrorDialog(
+          title: "No Location Found",
+          message:
+          "We couldn’t detect your location. Please check if GPS is turned on.",
+          retryPermission: true,
+        );
+        return;
+      }
+
+      if (!mounted) return;
       _updateUserMarker(LatLng(pos.latitude, pos.longitude));
 
       if (_mapController.isCompleted) {
         final controller = await _mapController.future;
+        if (!mounted) return;
         controller.animateCamera(
           CameraUpdate.newLatLngZoom(LatLng(pos.latitude, pos.longitude), 16),
         );
       }
 
       if (_enableLocationStream) {
-        _positionSub =
-            Geolocator.getPositionStream(
-              locationSettings: locationSettings,
-            ).listen((Position p) async {
-              final latlng = LatLng(p.latitude, p.longitude);
-              _updateUserMarker(latlng);
-              if (_mapReady && _mapController.isCompleted) {
-                final controller = await _mapController.future;
-                controller.animateCamera(CameraUpdate.newLatLng(latlng));
-              }
-            });
+        _positionSub = Geolocator.getPositionStream(
+          locationSettings: locationSettings,
+        ).listen((Position p) async {
+          final latlng = LatLng(p.latitude, p.longitude);
+          _updateUserMarker(latlng);
+          if (_mapReady && _mapController.isCompleted) {
+            final controller = await _mapController.future;
+            if (!mounted) return;
+            controller.animateCamera(CameraUpdate.newLatLng(latlng));
+          }
+        });
       }
     } catch (e) {
-      debugPrint('⚠️ Error initializing location: $e');
+      if (!mounted) return;
+      _showLocationErrorDialog(
+        title: "Error",
+        message: "An unexpected error occurred while fetching your location.",
+        retryPermission: true,
+      );
     }
+  }
+
+  void _showLocationErrorDialog({
+    required String title,
+    required String message,
+    bool openSettings = false,
+    bool retryPermission = false,
+  }) {
+    if (!mounted) return;
+
+    showDialog(
+      context: context,
+      barrierDismissible: false,
+      builder: (_) => AlertDialog(
+        title: Text(title),
+        content: Text(message),
+        actions: [
+          if (openSettings)
+            TextButton(
+              onPressed: () async {
+                await Geolocator.openAppSettings();
+                if (!mounted) return;
+                Navigator.pop(context);
+                Future.delayed(const Duration(seconds: 2), _initLocationAndMap);
+              },
+              child: const Text("Open Settings"),
+            ),
+          TextButton(
+            onPressed: () async {
+              if (!mounted) return;
+              Navigator.pop(context);
+              if (retryPermission) {
+                await Geolocator.requestPermission();
+                Future.delayed(
+                    const Duration(milliseconds: 500), _initLocationAndMap);
+              }
+            },
+            child: const Text("OK"),
+          ),
+        ],
+      ),
+    );
   }
 
   void _updateUserMarker(LatLng pos) {
@@ -180,6 +253,7 @@ class _SharedHomeState extends State<SharedHome> with TickerProviderStateMixin {
 
   @override
   void dispose() {
+    _userListener?.cancel();
     _positionSub?.cancel();
     _panelController.dispose();
     super.dispose();
@@ -198,6 +272,9 @@ class _SharedHomeState extends State<SharedHome> with TickerProviderStateMixin {
               initialCameraPosition: _initialCamera,
               myLocationEnabled: false,
               zoomControlsEnabled: false,
+              zoomGesturesEnabled: !_featuresLocked,
+              scrollGesturesEnabled: !_featuresLocked,
+              rotateGesturesEnabled: !_featuresLocked,
               markers: Set<Marker>.of(_markers.values),
               onMapCreated: (controller) {
                 if (!_mapController.isCompleted) {
@@ -207,6 +284,51 @@ class _SharedHomeState extends State<SharedHome> with TickerProviderStateMixin {
               },
             ),
           ),
+
+          // ⚠️ Profile Incomplete Banner
+          if (_isProfileIncomplete)
+            Positioned(
+              top: 80,
+              left: 0,
+              right: 0,
+              child: Container(
+                color: Colors.amber.withValues(alpha: 0.8),
+                padding:
+                const EdgeInsets.symmetric(horizontal: 16, vertical: 10),
+                child: Row(
+                  mainAxisAlignment: MainAxisAlignment.spaceBetween,
+                  children: [
+                    const Expanded(
+                      child: Text(
+                        "⚠️ Please complete your profile to unlock all features.",
+                        style: TextStyle(
+                          fontSize: 13,
+                          fontWeight: FontWeight.w500,
+                          color: Colors.black87,
+                        ),
+                      ),
+                    ),
+                    TextButton(
+                      onPressed: () {
+                        Navigator.push(
+                          context,
+                          MaterialPageRoute(
+                            builder: (_) => const ProfileSettingsPage(),
+                          ),
+                        );
+                      },
+                      child: const Text(
+                        "Complete Now",
+                        style: TextStyle(
+                          color: Colors.blueAccent,
+                          fontWeight: FontWeight.bold,
+                        ),
+                      ),
+                    ),
+                  ],
+                ),
+              ),
+            ),
 
           // 🔝 TOP BAR
           SafeArea(
@@ -226,7 +348,7 @@ class _SharedHomeState extends State<SharedHome> with TickerProviderStateMixin {
                         borderRadius: BorderRadius.circular(12),
                         boxShadow: [
                           BoxShadow(
-                            color: Colors.black.withOpacity(0.08),
+                            color: Colors.black.withValues(alpha: 0.08),
                             blurRadius: 6,
                           ),
                         ],
@@ -253,9 +375,9 @@ class _SharedHomeState extends State<SharedHome> with TickerProviderStateMixin {
                     ),
                   ),
                   const Spacer(),
-                  Text(
+                  const Text(
                     "PARA!",
-                    style: const TextStyle(
+                    style: TextStyle(
                       fontWeight: FontWeight.bold,
                       fontSize: 16,
                       color: Colors.white,
@@ -272,7 +394,7 @@ class _SharedHomeState extends State<SharedHome> with TickerProviderStateMixin {
             Positioned.fill(
               child: GestureDetector(
                 onTap: _togglePanel,
-                child: Container(color: Colors.black.withOpacity(0.35)),
+                child: Container(color: Colors.black.withValues(alpha: 0.35)),
               ),
             ),
 
@@ -307,13 +429,9 @@ class _SharedHomeState extends State<SharedHome> with TickerProviderStateMixin {
         child: SingleChildScrollView(
           child: Column(
             children: [
-              // Header
               Container(
                 width: double.infinity,
-                padding: const EdgeInsets.symmetric(
-                  horizontal: 18,
-                  vertical: 20,
-                ),
+                padding: const EdgeInsets.symmetric(horizontal: 18, vertical: 20),
                 decoration: BoxDecoration(
                   color: Colors.grey[100],
                   borderRadius: const BorderRadius.only(
@@ -359,17 +477,24 @@ class _SharedHomeState extends State<SharedHome> with TickerProviderStateMixin {
                   ],
                 ),
               ),
-
-              // Custom role menu
               if (widget.roleMenu != null) ...widget.roleMenu!,
-
-              // Logout
+              ListTile(
+                leading: const Icon(Icons.person),
+                title: const Text('Profile Settings'),
+                onTap: () {
+                  Navigator.push(
+                    context,
+                    MaterialPageRoute(
+                      builder: (_) => const ProfileSettingsPage(),
+                    ),
+                  );
+                },
+              ),
               ListTile(
                 leading: const Icon(Icons.logout),
                 title: const Text('Log out'),
                 onTap: widget.onSignOut,
               ),
-
               const Divider(),
               Padding(
                 padding: const EdgeInsets.symmetric(vertical: 18.0),

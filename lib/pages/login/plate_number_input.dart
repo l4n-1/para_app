@@ -1,11 +1,13 @@
-// lib/pages/plate_number_input.dart
+// lib/pages/login/plate_number_input.dart
 import 'package:flutter/material.dart';
 import 'package:firebase_auth/firebase_auth.dart';
-import 'package:para2/services/firebase_services.dart';
-import 'package:para2/pages/home/tsuper/tsuperhero_home.dart';
+import 'package:firebase_database/firebase_database.dart';
+import 'package:cloud_firestore/cloud_firestore.dart';
+import 'package:para2/pages/home/shared_home.dart';
 
 class PlateNumberInputPage extends StatefulWidget {
   final String deviceId;
+
   const PlateNumberInputPage({super.key, required this.deviceId});
 
   @override
@@ -13,13 +15,12 @@ class PlateNumberInputPage extends StatefulWidget {
 }
 
 class _PlateNumberInputPageState extends State<PlateNumberInputPage> {
-  final _plateController = TextEditingController();
-  final _formKey = GlobalKey<FormState>();
-  final FirebaseService _fs = FirebaseService();
-  bool _isSaving = false;
+  final TextEditingController _plateController = TextEditingController();
+  bool _isSubmitting = false;
 
-  // Plate pattern: 3 uppercase letters + 4 digits, optional single space allowed (e.g. ABC1234 or ABC 1234)
-  final RegExp _plateRegex = RegExp(r'^[A-Z]{3}\s?\d{4}$');
+  final FirebaseAuth _auth = FirebaseAuth.instance;
+  final FirebaseFirestore _firestore = FirebaseFirestore.instance;
+  final FirebaseDatabase _database = FirebaseDatabase.instance;
 
   @override
   void dispose() {
@@ -27,71 +28,126 @@ class _PlateNumberInputPageState extends State<PlateNumberInputPage> {
     super.dispose();
   }
 
-  Future<void> _submit() async {
-    if (!_formKey.currentState!.validate()) return;
-    setState(() => _isSaving = true);
-    try {
-      final user = FirebaseAuth.instance.currentUser;
-      if (user == null) {
-        ScaffoldMessenger.of(context).showSnackBar(const SnackBar(content: Text('No authenticated user found')));
-        return;
-      }
-      final plate = _plateController.text.trim().toUpperCase();
-      await _fs.updateUserRoleAndHardware(
-        uid: user.uid,
-        role: 'tsuperhero',
-        hardwareId: widget.deviceId,
-        plateNumber: plate,
-      );
-      // redirect
-      if (!mounted) return;
-      Navigator.of(context).pushReplacement(MaterialPageRoute(builder: (_) => const TsuperheroHome()));
-    } catch (e) {
-      ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text('Failed to upgrade: $e')));
-    } finally {
-      setState(() => _isSaving = false);
-    }
-  }
+  Future<void> _submitPlate() async {
+    final plate = _plateController.text.trim().toUpperCase();
 
-  String? _validatePlate(String? value) {
-    if (value == null || value.trim().isEmpty) return 'Please enter plate number';
-    final v = value.trim().toUpperCase();
-    if (!_plateRegex.hasMatch(v)) return 'Invalid plate. Use ABC1234';
-    return null;
+    if (plate.isEmpty || plate.length < 6) {
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(
+          content: Text("⚠️ Please enter a valid plate number."),
+        ),
+      );
+      return;
+    }
+
+    final user = _auth.currentUser;
+    if (user == null) {
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(content: Text("❌ No user found. Please log in again.")),
+      );
+      return;
+    }
+
+    setState(() => _isSubmitting = true);
+
+    try {
+      // 🔹 1. Update Firestore user role & plate number
+      await _firestore.collection('users').doc(user.uid).set({
+        'role': 'tsuperhero',
+        'plateNumber': plate,
+        'deviceId': widget.deviceId,
+        'activatedAt': FieldValue.serverTimestamp(),
+      }, SetOptions(merge: true));
+
+      // 🔹 2. Mark the device as assigned in Realtime Database
+      await _database.ref('devices/${widget.deviceId}').update({
+        'assigned': true,
+        'userId': user.uid,
+        'activatedAt': ServerValue.timestamp,
+      });
+
+      // 🔹 3. Confirmation message
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(content: Text('✅ TsuperHero activation successful!')),
+      );
+
+      // 🔹 4. Navigate to SharedHome (driver view)
+      if (!mounted) return;
+      Navigator.pushReplacement(
+        context,
+        MaterialPageRoute(
+          builder: (_) => const SharedHome(roleLabel: 'TSUPERHERO'),
+        ),
+      );
+    } catch (e) {
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(content: Text('❌ Activation failed: $e')),
+      );
+    } finally {
+      if (mounted) setState(() => _isSubmitting = false);
+    }
   }
 
   @override
   Widget build(BuildContext context) {
     return Scaffold(
+      backgroundColor: const Color.fromARGB(255, 240, 240, 240),
       appBar: AppBar(
-        title: const Text('Enter Plate Number'),
+        title: const Text("TsuperHero Activation"),
+        centerTitle: true,
+        backgroundColor: const Color.fromARGB(255, 73, 172, 123),
       ),
-      body: SafeArea(
-        child: Padding(
-          padding: const EdgeInsets.all(16.0),
-          child: Column(
-            children: [
-              const Text('Confirm your jeep plate number to activate driver mode.'),
-              const SizedBox(height: 16),
-              Form(
-                key: _formKey,
-                child: TextFormField(
-                  controller: _plateController,
-                  textCapitalization: TextCapitalization.characters,
-                  decoration: const InputDecoration(
-                    hintText: 'ABC1234',
-                    labelText: 'Plate Number',
+      body: Padding(
+        padding: const EdgeInsets.all(20.0),
+        child: Column(
+          mainAxisAlignment: MainAxisAlignment.center,
+          children: [
+            const Text(
+              "Enter your Plate Number",
+              style: TextStyle(
+                fontSize: 18,
+                fontWeight: FontWeight.w600,
+              ),
+            ),
+            const SizedBox(height: 20),
+            TextField(
+              controller: _plateController,
+              textCapitalization: TextCapitalization.characters,
+              decoration: InputDecoration(
+                hintText: "e.g. ABC 1234",
+                border: OutlineInputBorder(
+                  borderRadius: BorderRadius.circular(20),
+                ),
+                filled: true,
+                fillColor: Colors.white,
+              ),
+            ),
+            const SizedBox(height: 30),
+            SizedBox(
+              width: 200,
+              child: ElevatedButton(
+                onPressed: _isSubmitting ? null : _submitPlate,
+                style: ElevatedButton.styleFrom(
+                  backgroundColor: const Color.fromARGB(255, 73, 172, 123),
+                  padding:
+                  const EdgeInsets.symmetric(horizontal: 40, vertical: 14),
+                  shape: RoundedRectangleBorder(
+                    borderRadius: BorderRadius.circular(30),
                   ),
-                  validator: _validatePlate,
+                ),
+                child: _isSubmitting
+                    ? const CircularProgressIndicator(color: Colors.white)
+                    : const Text(
+                  "Activate",
+                  style: TextStyle(
+                    color: Colors.black,
+                    fontSize: 16,
+                    fontWeight: FontWeight.bold,
+                  ),
                 ),
               ),
-              const SizedBox(height: 20),
-              ElevatedButton(
-                onPressed: _isSaving ? null : _submit,
-                child: _isSaving ? const CircularProgressIndicator() : const Text('Activate'),
-              ),
-            ],
-          ),
+            ),
+          ],
         ),
       ),
     );

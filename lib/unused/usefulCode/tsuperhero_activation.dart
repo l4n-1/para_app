@@ -1,8 +1,9 @@
-// lib/pages/tsuperhero_activation.dart
+// lib/pages/unused/usefulCode/tsuperhero_activation.dart
 import 'dart:convert';
 import 'package:flutter/material.dart';
 import 'package:qr_code_scanner/qr_code_scanner.dart';
 import 'package:firebase_auth/firebase_auth.dart';
+import 'package:firebase_database/firebase_database.dart';
 import 'package:para2/pages/login/signup_tsuperhero.dart';
 import 'package:para2/pages/login/plate_number_input.dart';
 
@@ -10,7 +11,8 @@ class TsuperheroActivationPage extends StatefulWidget {
   const TsuperheroActivationPage({super.key});
 
   @override
-  State<TsuperheroActivationPage> createState() => _TsuperheroActivationPageState();
+  State<TsuperheroActivationPage> createState() =>
+      _TsuperheroActivationPageState();
 }
 
 class _TsuperheroActivationPageState extends State<TsuperheroActivationPage> {
@@ -21,7 +23,6 @@ class _TsuperheroActivationPageState extends State<TsuperheroActivationPage> {
   @override
   void reassemble() {
     super.reassemble();
-    // Ensures camera works correctly on hot reload
     controller?.pauseCamera();
     controller?.resumeCamera();
   }
@@ -30,19 +31,19 @@ class _TsuperheroActivationPageState extends State<TsuperheroActivationPage> {
     controller = ctrl;
 
     controller!.scannedDataStream.listen((scanData) async {
-      if (_processing) return; // Prevent duplicate scans
+      if (_processing) return;
       _processing = true;
 
       try {
         final raw = scanData.code;
         if (raw == null || raw.trim().isEmpty) {
-          _showMessage('Scanned empty or unreadable QR code.');
+          _showMessage('⚠️ Scanned empty or unreadable QR code.');
           await controller?.resumeCamera();
           _processing = false;
           return;
         }
 
-        /// Expected format: {"deviceId":"box-0001"} or plain "box-0001"
+        // Expect JSON {"deviceId": "box-0001"} or plain "box-0001"
         String? deviceId;
         try {
           final decoded = json.decode(raw);
@@ -50,25 +51,53 @@ class _TsuperheroActivationPageState extends State<TsuperheroActivationPage> {
             deviceId = decoded['deviceId'].toString();
           }
         } catch (_) {
-          // Not JSON → treat as plain string
           final plain = raw.trim();
           if (plain.isNotEmpty) deviceId = plain;
         }
 
         if (deviceId == null || deviceId.isEmpty) {
-          _showMessage('Invalid QR code contents.');
+          _showMessage('⚠️ Invalid QR code contents.');
           await controller?.resumeCamera();
           _processing = false;
           return;
         }
 
-        // Pause camera before navigating
+        // ✅ Validate deviceId from Firebase Realtime Database
+        final dbRef = FirebaseDatabase.instance.ref('devices/$deviceId');
+        final snapshot = await dbRef.get();
+
+        if (!snapshot.exists) {
+          _showMessage('❌ This QR is not registered.');
+          await controller?.resumeCamera();
+          _processing = false;
+          return;
+        }
+
+        final deviceData = snapshot.value as Map?;
+        final valid = deviceData?['valid'] == true;
+        final assigned = deviceData?['assigned'] == true;
+
+        if (!valid) {
+          _showMessage('❌ This QR code is not authorized.');
+          await controller?.resumeCamera();
+          _processing = false;
+          return;
+        }
+
+        if (assigned) {
+          _showMessage('⚠️ This QR code is already used by another driver.');
+          await controller?.resumeCamera();
+          _processing = false;
+          return;
+        }
+
+        // Pause camera before proceeding
         await controller?.pauseCamera();
 
         final user = FirebaseAuth.instance.currentUser;
 
         if (user != null) {
-          // Logged in: direct to plate number input
+          // Logged in → go to PlateNumberInputPage
           if (!mounted) return;
           Navigator.of(context).pushReplacement(
             MaterialPageRoute(
@@ -76,7 +105,7 @@ class _TsuperheroActivationPageState extends State<TsuperheroActivationPage> {
             ),
           );
         } else {
-          // Not logged in: go to tsuperhero signup
+          // Not logged in → go to SignupTsuperhero
           if (!mounted) return;
           Navigator.of(context).pushReplacement(
             MaterialPageRoute(
@@ -85,7 +114,7 @@ class _TsuperheroActivationPageState extends State<TsuperheroActivationPage> {
           );
         }
       } catch (e) {
-        _showMessage('QR handling error: $e');
+        _showMessage('❌ QR handling error: $e');
         await controller?.resumeCamera();
       } finally {
         _processing = false;
@@ -99,7 +128,7 @@ class _TsuperheroActivationPageState extends State<TsuperheroActivationPage> {
       SnackBar(
         content: Text(message),
         behavior: SnackBarBehavior.floating,
-        duration: const Duration(seconds: 2),
+        duration: const Duration(seconds: 3),
       ),
     );
   }
