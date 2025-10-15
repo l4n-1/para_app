@@ -1,10 +1,9 @@
 import 'package:flutter/material.dart';
 import 'package:firebase_auth/firebase_auth.dart';
 import 'package:cloud_firestore/cloud_firestore.dart';
+import 'package:para2/pages/home/role_router.dart';
 import 'package:para2/services/auth_service.dart';
 import 'package:para2/pages/login/signup_page.dart';
-import 'package:para2/pages/home/pasa/pasahero_home.dart';
-import 'package:para2/pages/home/tsuper/tsuperhero_home.dart';
 
 class LoginPage extends StatefulWidget {
   const LoginPage({super.key});
@@ -46,9 +45,7 @@ class _LoginPageState extends State<LoginPage> {
       if (doc.exists) {
         return (doc.data()?['role'] as String?) ?? 'pasahero';
       }
-    } catch (_) {
-      // silently ignore and default to pasahero
-    }
+    } catch (_) {}
     return 'pasahero';
   }
 
@@ -105,15 +102,11 @@ class _LoginPageState extends State<LoginPage> {
     }
   }
 
+  // ✅ Clean navigation — SharedHome handles displaying the correct page
   void _navigateByRole(String? role) {
-    final normalizedRole = (role ?? 'pasahero').toLowerCase();
-    Widget destination = normalizedRole == 'tsuperhero'
-        ? const TsuperheroHome()
-        : const PasaheroHome();
-
     Navigator.pushReplacement(
       context,
-      MaterialPageRoute(builder: (_) => destination),
+      MaterialPageRoute(builder: (_) => const RoleRouter()),
     );
   }
 

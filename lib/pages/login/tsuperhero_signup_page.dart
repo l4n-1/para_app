@@ -1,15 +1,16 @@
+// lib/pages/login/tsuperhero_signup_page.dart
 import 'package:flutter/material.dart';
-import 'package:para2/pages/login/qr_scan_page.dart';
 import 'package:para2/pages/login/signup_step2.dart';
 
-class SignupPage extends StatefulWidget {
-  const SignupPage({super.key});
+class TsuperheroSignupPage extends StatefulWidget {
+  final String scannedId;
+  const TsuperheroSignupPage({super.key, required this.scannedId});
 
   @override
-  State<SignupPage> createState() => _SignupPageState();
+  State<TsuperheroSignupPage> createState() => _TsuperheroSignupPageState();
 }
 
-class _SignupPageState extends State<SignupPage> {
+class _TsuperheroSignupPageState extends State<TsuperheroSignupPage> {
   final TextEditingController _firstNameController = TextEditingController();
   final TextEditingController _lastNameController = TextEditingController();
   final TextEditingController _userNameController = TextEditingController();
@@ -17,17 +18,13 @@ class _SignupPageState extends State<SignupPage> {
 
   Future<void> _pickDOB() async {
     DateTime now = DateTime.now();
-    final DateTime? picked = await showDatePicker(
+    final picked = await showDatePicker(
       context: context,
       initialDate: DateTime(now.year - 18),
       firstDate: DateTime(1900),
       lastDate: now,
     );
-    if (picked != null) {
-      setState(() {
-        _selectedDOB = picked;
-      });
-    }
+    if (picked != null) setState(() => _selectedDOB = picked);
   }
 
   void _goToNextStep() {
@@ -60,13 +57,22 @@ class _SignupPageState extends State<SignupPage> {
       backgroundColor: const Color.fromARGB(255, 233, 233, 231),
       body: SafeArea(
         child: SingleChildScrollView(
-          padding: const EdgeInsets.symmetric(horizontal: 20.0),
+          padding: const EdgeInsets.symmetric(horizontal: 20),
           child: Column(
             children: [
               const SizedBox(height: 80),
               Image.asset('assets/Paralogotemp.png', height: 150, width: 150),
-              const SizedBox(height: 80),
-
+              const SizedBox(height: 40),
+              const Text(
+                'Tsuperhero Registration',
+                style: TextStyle(fontSize: 20, fontWeight: FontWeight.bold),
+              ),
+              const SizedBox(height: 20),
+              Text(
+                'Linked Jeepney ID: ${widget.scannedId}',
+                style: const TextStyle(color: Colors.black54),
+              ),
+              const SizedBox(height: 20),
               TextField(
                 controller: _firstNameController,
                 decoration: InputDecoration(
@@ -77,10 +83,6 @@ class _SignupPageState extends State<SignupPage> {
                   ),
                   filled: true,
                   fillColor: Colors.grey[200],
-                  contentPadding: const EdgeInsets.symmetric(
-                    horizontal: 20,
-                    vertical: 16,
-                  ),
                 ),
               ),
               const SizedBox(height: 10),
@@ -94,10 +96,6 @@ class _SignupPageState extends State<SignupPage> {
                   ),
                   filled: true,
                   fillColor: Colors.grey[200],
-                  contentPadding: const EdgeInsets.symmetric(
-                    horizontal: 20,
-                    vertical: 16,
-                  ),
                 ),
               ),
               const SizedBox(height: 10),
@@ -111,10 +109,6 @@ class _SignupPageState extends State<SignupPage> {
                   ),
                   filled: true,
                   fillColor: Colors.grey[200],
-                  contentPadding: const EdgeInsets.symmetric(
-                    horizontal: 20,
-                    vertical: 16,
-                  ),
                 ),
               ),
               const SizedBox(height: 10),
@@ -132,45 +126,19 @@ class _SignupPageState extends State<SignupPage> {
                     _selectedDOB == null
                         ? 'Select Date of Birth'
                         : '${_selectedDOB!.year}-${_selectedDOB!.month}-${_selectedDOB!.day}',
-                    style: TextStyle(
-                      fontSize: 16,
-                      color: _selectedDOB == null
-                          ? Colors.black.withOpacity(0.5)
-                          : Colors.black,
-                    ),
                   ),
                 ),
               ),
               const SizedBox(height: 30),
-              SizedBox(
-                width: 120,
-                child: ElevatedButton(
-                  onPressed: _goToNextStep,
-                  style: ElevatedButton.styleFrom(
-                    backgroundColor: const Color.fromARGB(255, 73, 172, 123),
-                    shape: RoundedRectangleBorder(
-                      borderRadius: BorderRadius.circular(25),
-                    ),
-                  ),
-                  child: const Text(
-                    'Next',
-                    style: TextStyle(color: Colors.black, fontSize: 16),
-                  ),
-                ),
-              ),
-              const SizedBox(height: 40),
-              ElevatedButton.icon(
-                onPressed: () {
-                  Navigator.push(
-                    context,
-                    MaterialPageRoute(builder: (_) => const QRScanPage()),
-                  );
-                },
-                icon: const Icon(Icons.qr_code_scanner),
-                label: const Text("Scan QR to Register as Tsuperhero"),
+              ElevatedButton(
+                onPressed: _goToNextStep,
                 style: ElevatedButton.styleFrom(
                   backgroundColor: const Color.fromARGB(255, 73, 172, 123),
+                  shape: RoundedRectangleBorder(
+                    borderRadius: BorderRadius.circular(25),
+                  ),
                 ),
+                child: const Text('Next'),
               ),
             ],
           ),

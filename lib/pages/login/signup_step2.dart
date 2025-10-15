@@ -3,8 +3,9 @@ import 'dart:async';
 import 'package:flutter/material.dart';
 import 'package:firebase_auth/firebase_auth.dart';
 import 'package:cloud_firestore/cloud_firestore.dart';
+import 'package:para2/pages/login/tsuperhero_signup_page.dart';
 import 'package:para2/services/auth_service.dart';
-import 'package:para2/pages/home/pasa/pasahero_home.dart';
+import 'package:para2/pages/home/shared_home.dart';
 
 class SignupStep2 extends StatefulWidget {
   final String firstName;
@@ -63,7 +64,7 @@ class _SignupStep2State extends State<SignupStep2> {
 
       final user = userCredential.user!;
       await _firestore.collection('users').doc(user.uid).set({
-        'role': 'pasahero',
+        'role': widget is TsuperheroSignupPage ? 'tsuperhero' : 'pasahero',
       }, SetOptions(merge: true));
 
       await user.sendEmailVerification();
@@ -100,7 +101,9 @@ class _SignupStep2State extends State<SignupStep2> {
             // Redirect directly to home
             Navigator.pushReplacement(
               context,
-              MaterialPageRoute(builder: (_) => const PasaheroHome()),
+              MaterialPageRoute(
+                builder: (_) => const SharedHome(roleLabel: 'PASAHERO'),
+              ),
             );
           }
         });

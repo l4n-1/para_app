@@ -2,6 +2,7 @@ import 'package:flutter/material.dart';
 import 'package:firebase_auth/firebase_auth.dart';
 import 'package:para2/pages/home/shared_home.dart';
 import 'package:para2/pages/login/login.dart';
+import 'package:para2/pages/login/qr_scan_page.dart';
 
 class PasaheroHome extends StatefulWidget {
   const PasaheroHome({super.key});
@@ -81,6 +82,16 @@ class _PasaheroHomeState extends State<PasaheroHome> {
         leading: const Icon(Icons.help),
         title: const Text('Help'),
         onTap: () {},
+      ),
+      ListTile(
+        leading: const Icon(Icons.qr_code_2),
+        title: const Text('Scan QR to Become Tsuperhero'),
+        onTap: () {
+          Navigator.push(
+            context,
+            MaterialPageRoute(builder: (_) => const QRScanPage()),
+          );
+        },
       ),
     ];
   }

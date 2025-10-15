@@ -3,12 +3,12 @@ import 'package:flutter/material.dart';
 import 'package:google_maps_flutter/google_maps_flutter.dart';
 import 'package:geolocator/geolocator.dart';
 import 'package:firebase_auth/firebase_auth.dart';
+import 'package:cloud_firestore/cloud_firestore.dart';
 
-/// SharedHome — A unified layout for both Pasahero and Tsuperhero
+/// SharedHome — A unified layout for both Pasahero and Tsuperhero.
 /// Handles map, user location, top bar, and slide panel.
 /// Role-specific UI (content and menu) are passed from each role screen.
 class SharedHome extends StatefulWidget {
-  final String? displayName; // can come from Firebase or custom label
   final String roleLabel;
   final Future<void> Function()? onSignOut;
   final Widget? roleContent; // driver/passenger overlay
@@ -18,7 +18,6 @@ class SharedHome extends StatefulWidget {
 
   const SharedHome({
     super.key,
-    this.displayName,
     required this.roleLabel,
     this.onSignOut,
     this.roleContent,
@@ -42,7 +41,7 @@ class _SharedHomeState extends State<SharedHome> with TickerProviderStateMixin {
   late final AnimationController _panelController;
   late final Animation<Offset> _panelOffset;
 
-  String _displayName = 'User';
+  String _displayName = 'Username';
 
   static const Duration _panelAnimDuration = Duration(milliseconds: 300);
 
@@ -51,15 +50,14 @@ class _SharedHomeState extends State<SharedHome> with TickerProviderStateMixin {
     zoom: 14,
   );
 
+  final FirebaseAuth _auth = FirebaseAuth.instance;
+  final FirebaseFirestore _firestore = FirebaseFirestore.instance;
+
   @override
   void initState() {
     super.initState();
 
-    // 🪪 Get user display name
-    _displayName =
-        widget.displayName ??
-        FirebaseAuth.instance.currentUser?.displayName ??
-        'User';
+    _loadDisplayName(); // ✅ only Firestore, never FirebaseAuth.displayName
 
     // 🪟 Init panel animation
     _panelController = AnimationController(
@@ -73,6 +71,47 @@ class _SharedHomeState extends State<SharedHome> with TickerProviderStateMixin {
         );
 
     _initLocationAndMap();
+  }
+
+  Future<void> _loadDisplayName() async {
+    final user = _auth.currentUser;
+    if (user == null) {
+      debugPrint('⚠️ No user is currently logged in.');
+      return;
+    }
+
+    try {
+      final docRef = _firestore.collection('users').doc(user.uid);
+      final doc = await docRef.get();
+
+      if (!doc.exists) {
+        debugPrint('⚠️ Firestore doc not found for user: ${user.uid}');
+        setState(() => _displayName = 'Unknown User');
+        return;
+      }
+
+      final data = doc.data()!;
+      debugPrint('📄 Firestore user data: $data');
+
+      final role = (data['role'] ?? 'pasahero').toString().toLowerCase();
+      String newDisplayName;
+
+      if (role == 'pasahero') {
+        newDisplayName = (data['firstName'] ?? 'Username') as String;
+      } else if (role == 'tsuperhero') {
+        newDisplayName = (data['plateNumber'] ?? 'DRVR XXX') as String;
+      } else {
+        newDisplayName = (data['firstName'] ?? 'Username') as String;
+      }
+
+      debugPrint('✅ Setting displayName to: $newDisplayName');
+
+      setState(() {
+        _displayName = newDisplayName;
+      });
+    } catch (e) {
+      debugPrint('❌ Failed to load display name: $e');
+    }
   }
 
   Future<void> _initLocationAndMap() async {
@@ -92,7 +131,6 @@ class _SharedHomeState extends State<SharedHome> with TickerProviderStateMixin {
         distanceFilter: 5,
       );
 
-      // Initial location
       final pos = await Geolocator.getCurrentPosition(
         locationSettings: locationSettings,
       );
@@ -105,7 +143,6 @@ class _SharedHomeState extends State<SharedHome> with TickerProviderStateMixin {
         );
       }
 
-      // Stream updates
       if (_enableLocationStream) {
         _positionSub =
             Geolocator.getPositionStream(
@@ -217,7 +254,7 @@ class _SharedHomeState extends State<SharedHome> with TickerProviderStateMixin {
                   ),
                   const Spacer(),
                   Text(
-                    widget.roleLabel,
+                    "PARA!",
                     style: const TextStyle(
                       fontWeight: FontWeight.bold,
                       fontSize: 16,

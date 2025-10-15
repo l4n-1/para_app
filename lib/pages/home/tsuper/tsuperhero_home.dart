@@ -52,7 +52,6 @@ class _TsuperheroHomeState extends State<TsuperheroHome> {
   @override
   Widget build(BuildContext context) {
     return SharedHome(
-      displayName: _plateNumber,
       roleLabel: 'TSUPERHERO',
       onSignOut: _handleSignOut,
       roleContent: _buildDriverContent(),

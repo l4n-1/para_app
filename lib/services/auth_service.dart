@@ -33,6 +33,7 @@ class AuthService {
       'dob': dob.toIso8601String(),
       'email': email,
       'createdAt': FieldValue.serverTimestamp(),
+      'role': 'pasahero',
     });
 
     return userCredential;
@@ -83,6 +84,7 @@ class AuthService {
         'dob': '',
         'email': googleUser.email,
         'createdAt': FieldValue.serverTimestamp(),
+        'role': 'pasahero',
       });
     }
 
