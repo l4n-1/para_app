@@ -30,6 +30,8 @@ class _PasaheroHomeState extends State<PasaheroHome> {
   Map<String, Map<String, dynamic>> _jeepneys = {};
   Stream<DatabaseEvent>? _rtdbStream;
 
+  final Set<Polyline> _polylines = {};
+
   @override
   void initState() {
     super.initState();
@@ -61,7 +63,10 @@ class _PasaheroHomeState extends State<PasaheroHome> {
         }
       });
 
-      setState(() => _jeepneys = updated);
+      setState(() {
+        _jeepneys = updated;
+        _updatePolyline();
+      });
     });
   }
 
@@ -104,7 +109,7 @@ class _PasaheroHomeState extends State<PasaheroHome> {
     );
   }
 
-  void _onMapTap(LatLng position) {
+  void _onMapTap(LatLng position) async {
     setState(() {
       _destination = position;
       _hasSetDestination = true;
@@ -113,9 +118,58 @@ class _PasaheroHomeState extends State<PasaheroHome> {
       _selectedJeepId = null;
     });
 
-    ScaffoldMessenger.of(context).showSnackBar(
-      const SnackBar(content: Text('📍 Destination selected! Now pick a jeepney.')),
+    // ✅ Build the destination marker
+    final destMarker = Marker(
+      markerId: const MarkerId('destination_marker'),
+      position: position,
+      infoWindow: const InfoWindow(title: 'Destination'),
+      icon: BitmapDescriptor.defaultMarkerWithHue(BitmapDescriptor.hueRed),
     );
+
+    // ✅ Access the SharedHome state safely and call its helper method
+    final sharedHomeState = SharedHome.of(context);
+    sharedHomeState?.addOrUpdateMarker(
+      const MarkerId('destination_marker'),
+      destMarker,
+    );
+
+    // ✅ Zoom the camera to the tapped spot
+    final controller = await sharedHomeState?._mapController.future;
+    if (controller != null) {
+      controller.animateCamera(CameraUpdate.newLatLngZoom(position, 16));
+    }
+
+    ScaffoldMessenger.of(context).showSnackBar(
+      const SnackBar(content: Text('📍 Destination set! Choose a jeepney.')),
+    );
+  }
+
+  void _updatePolyline() {
+    _polylines.clear();
+    if (_userLoc == null) return;
+
+    // Show Pasahero → Jeepney line
+    if (_hasSelectedJeep && _selectedJeepId != null && _jeepneys[_selectedJeepId] != null) {
+      final jeepData = _jeepneys[_selectedJeepId]!;
+      final jeepPos = LatLng(jeepData['lat'], jeepData['lng']);
+      _polylines.add(Polyline(
+        polylineId: const PolylineId("trackingLine"),
+        visible: true,
+        color: Colors.green,
+        width: 4,
+        points: [_userLoc!, jeepPos],
+      ));
+    }
+
+    // Show Pasahero → Destination line (optional visual)
+    if (_destination != null) {
+      _polylines.add(Polyline(
+        polylineId: const PolylineId("destinationLine"),
+        color: Colors.blueAccent,
+        width: 3,
+        points: [_userLoc!, _destination!],
+      ));
+    }
   }
 
   Widget _buildJeepneySuggestionList() {
@@ -168,6 +222,7 @@ class _PasaheroHomeState extends State<PasaheroHome> {
                 setState(() {
                   _selectedJeepId = id;
                   _hasSelectedJeep = true;
+                  _updatePolyline();
                 });
                 ScaffoldMessenger.of(context).showSnackBar(
                   SnackBar(content: Text('🚍 Tracking jeepney: $id')),
@@ -236,6 +291,7 @@ class _PasaheroHomeState extends State<PasaheroHome> {
   Widget _buildRoleContent(BuildContext context, String displayName,
       LatLng? userLoc, void Function(LatLng) onTap) {
     _userLoc = userLoc;
+    _updatePolyline();
 
     return Stack(
       children: [
@@ -258,16 +314,13 @@ class _PasaheroHomeState extends State<PasaheroHome> {
               ),
             ),
           ),
-
         Positioned(
           bottom: 130,
           left: 0,
           right: 0,
           child: _buildJeepneySuggestionList(),
         ),
-
         _buildParaButton(),
-
         if (_hasSelectedJeep)
           Positioned(
             bottom: 200,
@@ -284,7 +337,6 @@ class _PasaheroHomeState extends State<PasaheroHome> {
               ),
             ),
           ),
-
         if (_hasSelectedJeep)
           Positioned(
             bottom: 200,
@@ -295,6 +347,7 @@ class _PasaheroHomeState extends State<PasaheroHome> {
                 setState(() {
                   _hasSelectedJeep = false;
                   _selectedJeepId = null;
+                  _polylines.clear();
                 });
               },
               child: const Icon(Icons.close, color: Colors.white),
@@ -341,6 +394,7 @@ class _PasaheroHomeState extends State<PasaheroHome> {
       onSignOut: _handleSignOut,
       roleMenu: _buildPasaheroMenu(),
       roleContentBuilder: _buildRoleContent,
+      onMapTap: _onMapTap,
     );
   }
 }

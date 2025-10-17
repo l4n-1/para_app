@@ -15,13 +15,16 @@ class SharedHome extends StatefulWidget {
   final Widget? roleContent;
   final List<Widget>? roleMenu;
 
-  /// Builder with: (context, displayName, userLocation, onMapTap)
+  /// Builder: (context, displayName, userLocation, onMapTap)
   final Widget Function(
       BuildContext context,
       String displayName,
       LatLng? userLocation,
       void Function(LatLng picked),
       )? roleContentBuilder;
+
+  /// 🟢 NEW: direct map tap callback for Pasahero/Tsuperhero
+  final void Function(LatLng)? onMapTap;
 
   const SharedHome({
     super.key,
@@ -30,6 +33,7 @@ class SharedHome extends StatefulWidget {
     this.roleContent,
     this.roleMenu,
     this.roleContentBuilder,
+    this.onMapTap, // ✅ added to constructor
   });
 
   @override
@@ -39,7 +43,6 @@ class SharedHome extends StatefulWidget {
 class _SharedHomeState extends State<SharedHome> with TickerProviderStateMixin {
   final Completer<GoogleMapController> _mapController = Completer();
   final Map<String, Marker> _jeepMarkers = {};
-  final Map<PolylineId, Polyline> _polylines = {};
   final Map<MarkerId, Marker> _markers = {};
   StreamSubscription<Position>? _positionSub;
   StreamSubscription<DatabaseEvent>? _devicesSub;
@@ -69,10 +72,8 @@ class _SharedHomeState extends State<SharedHome> with TickerProviderStateMixin {
 
   BitmapDescriptor? _jeepIcon;
 
-  // Tracking state
-  String? _trackedJeepId;
-  bool _followTrackedJeep = true;
-  double? _trackedETA; // in minutes
+  // External polyline layer from Pasahero
+  final Set<Polyline> _externalPolylines = {};
 
   @override
   void initState() {
@@ -279,6 +280,20 @@ class _SharedHomeState extends State<SharedHome> with TickerProviderStateMixin {
     });
   }
 
+  /// 🟢 Public method that Pasahero can call to add a custom marker.
+  void addOrUpdateMarker(MarkerId id, Marker marker) {
+    setState(() {
+      _markers[id] = marker;
+    });
+  }
+
+  /// 🟣 Public method to clear markers added by Pasahero (optional)
+  void removeMarker(MarkerId id) {
+    setState(() {
+      _markers.remove(id);
+    });
+  }
+
   @override
   void dispose() {
     _userListener?.cancel();
@@ -302,63 +317,23 @@ class _SharedHomeState extends State<SharedHome> with TickerProviderStateMixin {
               myLocationEnabled: false,
               zoomControlsEnabled: false,
               markers: {..._markers.values, ..._jeepMarkers.values}.toSet(),
-              polylines: _polylines.values.toSet(),
+              polylines: _externalPolylines, // ✅ draw ETA lines
               onMapCreated: (controller) {
                 if (!_mapController.isCompleted) {
                   _mapController.complete(controller);
                 }
                 setState(() => _mapReady = true);
               },
+
+              // ✅ This line makes map taps work again for Pasahero/Tsuperhero
+              onTap: widget.onMapTap,
             ),
           ),
 
-          // ⚠️ Profile incomplete banner
-          if (_isProfileIncomplete)
-            Positioned(
-              top: 80,
-              left: 0,
-              right: 0,
-              child: Container(
-                color: Colors.amber.withOpacity(0.9),
-                padding:
-                const EdgeInsets.symmetric(horizontal: 16, vertical: 10),
-                child: Row(
-                  mainAxisAlignment: MainAxisAlignment.spaceBetween,
-                  children: [
-                    const Expanded(
-                      child: Text(
-                        "⚠️ Please complete your profile to unlock all features.",
-                        style: TextStyle(
-                            fontSize: 13,
-                            fontWeight: FontWeight.w500,
-                            color: Colors.black87),
-                      ),
-                    ),
-                    TextButton(
-                      onPressed: () {
-                        Navigator.push(
-                          context,
-                          MaterialPageRoute(
-                              builder: (_) => const ProfileSettingsPage()),
-                        );
-                      },
-                      child: const Text(
-                        "Complete Now",
-                        style: TextStyle(
-                            color: Colors.blueAccent,
-                            fontWeight: FontWeight.bold),
-                      ),
-                    ),
-                  ],
-                ),
-              ),
-            ),
-
-          // 🔝 Top bar
+          // 🔝 Top Bar
           SafeArea(
             child: Padding(
-              padding:
-              const EdgeInsets.symmetric(horizontal: 12, vertical: 8),
+              padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 8),
               child: Row(
                 children: [
                   GestureDetector(
@@ -431,13 +406,17 @@ class _SharedHomeState extends State<SharedHome> with TickerProviderStateMixin {
             ),
           ),
 
-          // 🎯 Role overlay
+          // 🎯 Role overlay (UI layer)
           if (widget.roleContentBuilder != null)
             widget.roleContentBuilder!(
               context,
               _displayName,
               _userLocation,
-                  (LatLng picked) {},
+                  (LatLng picked) {
+                setState(() {
+                  _externalPolylines.clear();
+                });
+              },
             )
           else if (widget.roleContent != null)
             widget.roleContent!,
@@ -523,4 +502,10 @@ class _SharedHomeState extends State<SharedHome> with TickerProviderStateMixin {
       ),
     );
   }
+  /// ✅ Static helper to access the SharedHome state safely from outside
+  static _SharedHomeState? of(BuildContext context) {
+    final state = context.findAncestorStateOfType<_SharedHomeState>();
+    return state;
+  }
+
 }
