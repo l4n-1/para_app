@@ -3,6 +3,7 @@ import 'dart:async';
 import 'package:flutter/material.dart';
 import 'package:firebase_auth/firebase_auth.dart';
 import 'package:cloud_firestore/cloud_firestore.dart';
+import 'package:para2/pages/home/role_router.dart';
 import 'package:para2/pages/login/tsuperhero_signup_page.dart';
 import 'package:para2/services/auth_service.dart';
 import 'package:para2/pages/home/shared_home.dart';
@@ -25,7 +26,8 @@ class SignupStep2 extends StatefulWidget {
   State<SignupStep2> createState() => _SignupStep2State();
 }
 
-class _SignupStep2State extends State<SignupStep2> with SingleTickerProviderStateMixin {
+class _SignupStep2State extends State<SignupStep2>
+    with SingleTickerProviderStateMixin {
   final _emailController = TextEditingController();
   final _contactController = TextEditingController();
   final _passwordController = TextEditingController();
@@ -48,9 +50,10 @@ class _SignupStep2State extends State<SignupStep2> with SingleTickerProviderStat
       duration: const Duration(milliseconds: 400),
       vsync: this,
     );
-    _shakeAnimation = Tween<double>(begin: 0, end: 10)
-        .chain(CurveTween(curve: Curves.elasticIn))
-        .animate(_shakeController);
+    _shakeAnimation = Tween<double>(
+      begin: 0,
+      end: 10,
+    ).chain(CurveTween(curve: Curves.elasticIn)).animate(_shakeController);
   }
 
   @override
@@ -74,14 +77,19 @@ class _SignupStep2State extends State<SignupStep2> with SingleTickerProviderStat
     final password = _passwordController.text;
     final confirmPassword = _confirmPasswordController.text;
 
-    if (email.isEmpty || contact.isEmpty || password.isEmpty || confirmPassword.isEmpty) {
+    if (email.isEmpty ||
+        contact.isEmpty ||
+        password.isEmpty ||
+        confirmPassword.isEmpty) {
       _showSnackBar('Please fill in all fields');
       _triggerShake();
       return;
     }
 
     if (!_phContactRegex.hasMatch(contact)) {
-      _showSnackBar('Please enter a valid Philippine contact number (09XXXXXXXXX).');
+      _showSnackBar(
+        'Please enter a valid Philippine contact number (09XXXXXXXXX).',
+      );
       _triggerShake();
       return;
     }
@@ -93,7 +101,9 @@ class _SignupStep2State extends State<SignupStep2> with SingleTickerProviderStat
     }
 
     if (!_passwordRegex.hasMatch(password)) {
-      _showSnackBar('Password must be at least 8 chars, with 1 uppercase and 1 number.');
+      _showSnackBar(
+        'Password must be at least 8 chars, with 1 uppercase and 1 number.',
+      );
       _triggerShake();
       return;
     }
@@ -119,7 +129,6 @@ class _SignupStep2State extends State<SignupStep2> with SingleTickerProviderStat
 
       await user.sendEmailVerification();
       _showVerificationDialog(user);
-
     } on FirebaseAuthException catch (e) {
       _showSnackBar('Sign up failed: ${e.message}');
       _triggerShake();
@@ -137,7 +146,9 @@ class _SignupStep2State extends State<SignupStep2> with SingleTickerProviderStat
       barrierDismissible: false,
       barrierColor: Colors.black.withOpacity(0.6),
       builder: (_) {
-        _emailCheckTimer = Timer.periodic(const Duration(seconds: 3), (_) async {
+        _emailCheckTimer = Timer.periodic(const Duration(seconds: 3), (
+          _,
+        ) async {
           await user.reload();
           final refreshedUser = FirebaseAuth.instance.currentUser;
 
@@ -147,9 +158,7 @@ class _SignupStep2State extends State<SignupStep2> with SingleTickerProviderStat
 
             Navigator.pushReplacement(
               context,
-              MaterialPageRoute(
-                builder: (_) => const SharedHome(roleLabel: 'PASAHERO'),
-              ),
+              MaterialPageRoute(builder: (_) => const RoleRouter()),
             );
           }
         });
@@ -172,7 +181,9 @@ class _SignupStep2State extends State<SignupStep2> with SingleTickerProviderStat
             child: const Column(
               mainAxisSize: MainAxisSize.min,
               children: [
-                CircularProgressIndicator(color: Color.fromARGB(255, 73, 172, 123)),
+                CircularProgressIndicator(
+                  color: Color.fromARGB(255, 73, 172, 123),
+                ),
                 SizedBox(height: 20),
                 Text(
                   "Verifying...\nCheck your email.",
@@ -188,7 +199,9 @@ class _SignupStep2State extends State<SignupStep2> with SingleTickerProviderStat
   }
 
   void _showSnackBar(String message) {
-    ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text(message)));
+    ScaffoldMessenger.of(
+      context,
+    ).showSnackBar(SnackBar(content: Text(message)));
   }
 
   InputDecoration _inputDecoration(String hintText) {
@@ -246,7 +259,9 @@ class _SignupStep2State extends State<SignupStep2> with SingleTickerProviderStat
                     TextField(
                       controller: _contactController,
                       keyboardType: TextInputType.phone,
-                      decoration: _inputDecoration('Contact Number (09XXXXXXXXX)'),
+                      decoration: _inputDecoration(
+                        'Contact Number (09XXXXXXXXX)',
+                      ),
                     ),
                     const SizedBox(height: 10),
 
@@ -283,9 +298,9 @@ class _SignupStep2State extends State<SignupStep2> with SingleTickerProviderStat
                   child: _isLoading
                       ? const CircularProgressIndicator(color: Colors.white)
                       : const Text(
-                    'Sign Up',
-                    style: TextStyle(color: Colors.black, fontSize: 16),
-                  ),
+                          'Sign Up',
+                          style: TextStyle(color: Colors.black, fontSize: 16),
+                        ),
                 ),
               ),
               const SizedBox(height: 40),
