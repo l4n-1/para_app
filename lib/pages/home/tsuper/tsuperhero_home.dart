@@ -7,6 +7,7 @@ import 'package:firebase_database/firebase_database.dart';
 import 'package:google_maps_flutter/google_maps_flutter.dart';
 import 'package:para2/pages/login/login.dart';
 import 'package:para2/pages/home/shared_home.dart';
+import 'package:para2/services/RealtimeDatabaseService.dart'; // ✅ Correct import (lowercase file name)
 
 class TsuperheroHome extends StatefulWidget {
   const TsuperheroHome({super.key});
@@ -18,7 +19,8 @@ class TsuperheroHome extends StatefulWidget {
 class _TsuperheroHomeState extends State<TsuperheroHome> {
   final FirebaseAuth _auth = FirebaseAuth.instance;
   final FirebaseFirestore _firestore = FirebaseFirestore.instance;
-  final DatabaseReference _rtdbRef = FirebaseDatabase.instance.ref("devices");
+  final RealtimeDatabaseService _rtdbService =
+      RealtimeDatabaseService(); // ✅ Centralized RTDB service
 
   StreamSubscription<DatabaseEvent>? _trackerSub;
   Marker? _jeepMarker;
@@ -43,7 +45,7 @@ class _TsuperheroHomeState extends State<TsuperheroHome> {
 
       final data = doc.data() ?? {};
       final plate = data['plateNumber'] ?? 'DRVR-XXX';
-      final boxId = data['boxClaimed']; // from claimBaryaBox
+      final boxId = data['boxClaimed'];
       String? trackerId;
 
       // Check if user has a claimed box
@@ -71,51 +73,90 @@ class _TsuperheroHomeState extends State<TsuperheroHome> {
   }
 
   void _listenToTracker(String trackerId) {
-    _trackerSub?.cancel(); // Prevent multiple listeners
-    final trackerRef = _rtdbRef.child(trackerId);
+    _trackerSub?.cancel();
 
-    _trackerSub = trackerRef.onValue.listen((event) {
-      final snapshot = event.snapshot;
-      if (!snapshot.exists) {
-        debugPrint("⚠️ Tracker node $trackerId not found in RTDB");
-        return;
-      }
+    // ✅ Listen directly under devices/<trackerId>
+    final trackerRef = _rtdbService.database.ref('devices/$trackerId');
+    debugPrint("Listening to tracker at path: devices/$trackerId");
 
-      final data = Map<String, dynamic>.from(snapshot.value as Map);
-      debugPrint("📡 Tracker data: $data");
+    _trackerSub = trackerRef.onValue.listen(
+      (event) {
+        final snapshot = event.snapshot;
+        debugPrint("📡 Raw snapshot: ${snapshot.value}");
 
-      final lat = data['latitude'];
-      final lng = data['longitude'];
-      final speed = data['speed_kmh'] ?? 0;
+        if (!snapshot.exists || snapshot.value == null) {
+          debugPrint(
+            "⚠️ Tracker node devices/$trackerId not found or empty in RTDB",
+          );
+          return;
+        }
 
-      if (lat == null || lng == null) {
-        debugPrint("⚠️ Missing lat/lng in tracker data.");
-        return;
-      }
+        // Convert snapshot to map
+        Map<String, dynamic> data = {};
+        try {
+          final raw = snapshot.value;
+          if (raw is Map) {
+            raw.forEach((k, v) {
+              data[k.toString()] = v;
+            });
+          } else {
+            debugPrint("⚠️ Unexpected RTDB payload type: ${raw.runtimeType}");
+          }
+        } catch (e) {
+          debugPrint("⚠️ Error converting snapshot to map: $e");
+          return;
+        }
 
-      final pos = LatLng(
-        (lat is num) ? lat.toDouble() : double.tryParse(lat.toString()) ?? 0.0,
-        (lng is num) ? lng.toDouble() : double.tryParse(lng.toString()) ?? 0.0,
-      );
+        debugPrint("📡 Tracker data keys: ${data.keys.toList()}");
 
-      setState(() {
-        _jeepMarker = Marker(
-          markerId: const MarkerId('tsuperhero_jeep'),
-          position: pos,
-          infoWindow: InfoWindow(
-            title: trackerId,
-            snippet: 'Speed: ${speed.toString()} km/h',
-          ),
-          icon: BitmapDescriptor.defaultMarkerWithHue(
-            BitmapDescriptor.hueAzure,
-          ),
-        );
-      });
+        final latRaw = data['latitude'] ?? data['lat'];
+        final lngRaw = data['longitude'] ?? data['lng'];
+        final speed = data['speed_kmh'] ?? data['speed'] ?? 0;
 
-      // 🗺️ Update marker on shared map
-      final sharedHome = SharedHome.of(context);
-      sharedHome?.updateJeepMarker(_jeepMarker!);
-    });
+        if (latRaw == null || lngRaw == null) {
+          debugPrint("⚠️ Missing latitude/longitude in tracker data");
+          return;
+        }
+
+        double? parseDouble(dynamic v) {
+          if (v is num) return v.toDouble();
+          if (v is String) return double.tryParse(v);
+          return null;
+        }
+
+        final lat = parseDouble(latRaw);
+        final lng = parseDouble(lngRaw);
+        if (lat == null || lng == null) {
+          debugPrint(
+            "⚠️ Could not parse lat/lng to double. latRaw=$latRaw lngRaw=$lngRaw",
+          );
+          return;
+        }
+
+        final pos = LatLng(lat, lng);
+
+        setState(() {
+          _jeepMarker = Marker(
+            markerId: const MarkerId('tsuperhero_jeep'),
+            position: pos,
+            infoWindow: InfoWindow(
+              title: trackerId,
+              snippet: 'Speed: ${speed.toString()} km/h',
+            ),
+            icon: BitmapDescriptor.defaultMarkerWithHue(
+              BitmapDescriptor.hueAzure,
+            ),
+          );
+        });
+
+        // 🗺️ Update marker on shared map
+        final sharedHome = SharedHome.of(context);
+        sharedHome?.updateJeepMarker(_jeepMarker!);
+      },
+      onError: (err) {
+        debugPrint("RTDB listener error: $err");
+      },
+    );
   }
 
   Future<void> _handleSignOut() async {
@@ -169,7 +210,6 @@ class _TsuperheroHomeState extends State<TsuperheroHome> {
     );
   }
 
-  /// 🚌 Main driver action button
   Widget _buildDriverContent() {
     return Column(
       mainAxisAlignment: MainAxisAlignment.center,
@@ -224,14 +264,13 @@ class _TsuperheroHomeState extends State<TsuperheroHome> {
     );
   }
 
-  /// ⚙️ Driver-specific menu
   List<Widget> _buildDriverMenu() {
     return [
       ListTile(
         leading: const Icon(Icons.qr_code_scanner),
         title: const Text('Scan Activation QR'),
         onTap: () {
-          // TODO: navigate to QR activation page to call claimBaryaBox
+          // TODO: navigate to QR activation page
         },
       ),
       ListTile(

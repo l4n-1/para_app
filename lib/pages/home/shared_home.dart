@@ -1,8 +1,6 @@
-// lib/pages/home/shared_home.dart
 import 'dart:async';
 import 'package:flutter/material.dart';
 import 'package:google_maps_flutter/google_maps_flutter.dart';
-import 'package:geolocator/geolocator.dart';
 import 'package:firebase_auth/firebase_auth.dart';
 import 'package:cloud_firestore/cloud_firestore.dart';
 import 'package:firebase_database/firebase_database.dart';
@@ -32,9 +30,8 @@ class SharedHome extends StatefulWidget {
     this.onMapTap,
   });
 
-  static _SharedHomeState? of(BuildContext context) {
-    return context.findAncestorStateOfType<_SharedHomeState>();
-  }
+  static _SharedHomeState? of(BuildContext context) =>
+      context.findAncestorStateOfType<_SharedHomeState>();
 
   @override
   State<SharedHome> createState() => _SharedHomeState();
@@ -45,7 +42,6 @@ class _SharedHomeState extends State<SharedHome> with TickerProviderStateMixin {
   final Map<String, Marker> _jeepMarkers = {};
   final Map<MarkerId, Marker> _markers = {};
 
-  StreamSubscription<Position>? _positionSub;
   StreamSubscription<DatabaseEvent>? _devicesSub;
   StreamSubscription<DocumentSnapshot>? _userListener;
 
@@ -87,15 +83,13 @@ class _SharedHomeState extends State<SharedHome> with TickerProviderStateMixin {
 
     _loadAssets();
     _listenToUserData();
-    _initLocationAndMap();
 
-    // Pasahero should see all jeep markers; tsuperhero will update its own via updateJeepMarker()
+    // Only Pasahero should see jeep markers (from RTDB)
     if (widget.roleLabel.toUpperCase() != 'TSUPERHERO') {
       _subscribeDevicesRealtime();
     }
   }
 
-  // load jeep icon
   Future<void> _loadAssets() async {
     try {
       _jeepIcon = await BitmapDescriptor.fromAssetImage(
@@ -127,7 +121,6 @@ class _SharedHomeState extends State<SharedHome> with TickerProviderStateMixin {
           ];
 
           final isIncomplete = missingFields.isNotEmpty;
-
           if (mounted) {
             setState(() {
               _isProfileIncomplete = isIncomplete;
@@ -140,67 +133,12 @@ class _SharedHomeState extends State<SharedHome> with TickerProviderStateMixin {
                 _displayName = (data['firstName'] ?? 'Username') as String;
               } else if (role == 'tsuperhero') {
                 _displayName = (data['plateNumber'] ?? 'DRVR XXX') as String;
-              } else {
-                _displayName = (data['firstName'] ?? 'Username') as String;
               }
             });
           }
         });
   }
 
-  Future<void> _initLocationAndMap() async {
-    try {
-      LocationPermission permission = await Geolocator.checkPermission();
-      if (permission == LocationPermission.denied) {
-        permission = await Geolocator.requestPermission();
-      }
-
-      if (permission == LocationPermission.deniedForever ||
-          permission == LocationPermission.denied) {
-        return;
-      }
-
-      const locationSettings = LocationSettings(
-        accuracy: LocationAccuracy.best,
-        distanceFilter: 5,
-      );
-
-      final pos = await Geolocator.getCurrentPosition(
-        locationSettings: locationSettings,
-      );
-      _userLocation = LatLng(pos.latitude, pos.longitude);
-      _updateUserMarker(_userLocation!);
-
-      if (_mapController.isCompleted) {
-        final controller = await _mapController.future;
-        controller.animateCamera(
-          CameraUpdate.newLatLngZoom(_userLocation!, 16),
-        );
-      }
-
-      _positionSub =
-          Geolocator.getPositionStream(
-            locationSettings: locationSettings,
-          ).listen((Position p) {
-            _userLocation = LatLng(p.latitude, p.longitude);
-            _updateUserMarker(_userLocation!);
-          });
-    } catch (_) {
-      // ignore errors silently here; caller UIs handle missing location
-    }
-  }
-
-  void _updateUserMarker(LatLng pos) {
-    final marker = Marker(
-      markerId: const MarkerId('user_marker'),
-      position: pos,
-      infoWindow: const InfoWindow(title: 'You'),
-      icon: BitmapDescriptor.defaultMarkerWithHue(BitmapDescriptor.hueAzure),
-    );
-    setState(() => _markers[const MarkerId('user_marker')] = marker);
-  }
-
-  // Pasahero: listen to all devices in RTDB and show them
   void _subscribeDevicesRealtime() {
     _devicesSub = _realtime.ref('devices').onValue.listen((event) {
       final raw = event.snapshot.value;
@@ -209,7 +147,6 @@ class _SharedHomeState extends State<SharedHome> with TickerProviderStateMixin {
 
       devices.forEach((key, value) {
         final data = value as Map? ?? {};
-        // support both `latitude`/`longitude` and `lat`/`lng` common variants
         final lat = double.tryParse(
           data['latitude']?.toString() ?? data['lat']?.toString() ?? '',
         );
@@ -237,27 +174,22 @@ class _SharedHomeState extends State<SharedHome> with TickerProviderStateMixin {
     });
   }
 
-  /// Public: add or update a regular marker (e.g., destination)
   void addOrUpdateMarker(MarkerId id, Marker marker) {
     setState(() => _markers[id] = marker);
   }
 
-  /// Public: remove a marker by id
   void removeMarker(MarkerId id) {
     setState(() => _markers.remove(id));
   }
 
-  /// Public: update a single jeep marker (used by Tsuperhero to show their own ESP)
   void updateJeepMarker(Marker marker) {
     setState(() {
       _jeepMarkers[marker.markerId.value] = marker;
     });
   }
 
-  /// Public getter for external polylines (read-only)
   Set<Polyline> get externalPolylines => _externalPolylines;
 
-  /// Public setter to replace external polylines (used by Pasahero)
   void setExternalPolylines(Set<Polyline> newPolylines) {
     setState(() {
       _externalPolylines
@@ -266,10 +198,7 @@ class _SharedHomeState extends State<SharedHome> with TickerProviderStateMixin {
     });
   }
 
-  /// Public: clear external polylines
-  void clearExternalPolylines() {
-    setState(() => _externalPolylines.clear());
-  }
+  void clearExternalPolylines() => setState(() => _externalPolylines.clear());
 
   Future<GoogleMapController?> getMapController() async {
     if (!_mapController.isCompleted) return null;
@@ -293,7 +222,6 @@ class _SharedHomeState extends State<SharedHome> with TickerProviderStateMixin {
   @override
   void dispose() {
     _userListener?.cancel();
-    _positionSub?.cancel();
     _devicesSub?.cancel();
     _panelController.dispose();
     super.dispose();
@@ -322,8 +250,6 @@ class _SharedHomeState extends State<SharedHome> with TickerProviderStateMixin {
               onTap: widget.onMapTap,
             ),
           ),
-
-          // top bar
           SafeArea(
             child: Padding(
               padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 8),
@@ -381,7 +307,6 @@ class _SharedHomeState extends State<SharedHome> with TickerProviderStateMixin {
               ),
             ),
           ),
-
           if (_isPanelOpen)
             Positioned.fill(
               child: GestureDetector(
@@ -389,7 +314,6 @@ class _SharedHomeState extends State<SharedHome> with TickerProviderStateMixin {
                 child: Container(color: Colors.black.withOpacity(0.35)),
               ),
             ),
-
           Align(
             alignment: Alignment.centerLeft,
             child: SizedBox(
@@ -400,8 +324,6 @@ class _SharedHomeState extends State<SharedHome> with TickerProviderStateMixin {
               ),
             ),
           ),
-
-          // role overlay
           if (widget.roleContentBuilder != null)
             widget.roleContentBuilder!(
               context,

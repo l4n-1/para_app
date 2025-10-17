@@ -6,6 +6,7 @@ import 'package:para2/pages/home/shared_home.dart';
 import 'package:para2/pages/login/login.dart';
 import 'package:para2/pages/login/qr_scan_page.dart';
 import 'package:google_maps_flutter/google_maps_flutter.dart';
+import 'package:geolocator/geolocator.dart';
 import 'dart:math' as math;
 
 class PasaheroHome extends StatefulWidget {
@@ -35,7 +36,67 @@ class _PasaheroHomeState extends State<PasaheroHome> {
   @override
   void initState() {
     super.initState();
+    _initUserLocation(); // ✅ Initialize GPS tracking
     _listenToJeepneys();
+  }
+
+  // ✅ GPS Setup
+  Future<void> _initUserLocation() async {
+    try {
+      bool serviceEnabled = await Geolocator.isLocationServiceEnabled();
+      if (!serviceEnabled) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          const SnackBar(content: Text("⚠️ Please enable GPS service.")),
+        );
+        return;
+      }
+
+      LocationPermission permission = await Geolocator.checkPermission();
+      if (permission == LocationPermission.denied) {
+        permission = await Geolocator.requestPermission();
+      }
+      if (permission == LocationPermission.denied ||
+          permission == LocationPermission.deniedForever) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          const SnackBar(content: Text("❌ Location permission denied.")),
+        );
+        return;
+      }
+
+      final pos = await Geolocator.getCurrentPosition();
+      _updateUserLocation(LatLng(pos.latitude, pos.longitude));
+
+      Geolocator.getPositionStream(
+        locationSettings: const LocationSettings(
+          accuracy: LocationAccuracy.high,
+        ),
+      ).listen((p) {
+        _updateUserLocation(LatLng(p.latitude, p.longitude));
+      });
+    } catch (e) {
+      debugPrint("Error initializing GPS: $e");
+    }
+  }
+
+  void _updateUserLocation(LatLng pos) {
+    setState(() => _userLoc = pos);
+
+    final shared = SharedHome.of(context);
+    if (shared != null && mounted) {
+      shared.addOrUpdateMarker(
+        const MarkerId('user_marker'),
+        Marker(
+          markerId: const MarkerId('user_marker'),
+          position: pos,
+          infoWindow: const InfoWindow(title: 'You are here'),
+          icon: BitmapDescriptor.defaultMarkerWithHue(
+            BitmapDescriptor.hueAzure,
+          ),
+        ),
+      );
+    }
+
+    _updatePolyline();
   }
 
   void _listenToJeepneys() {
@@ -171,7 +232,6 @@ class _PasaheroHomeState extends State<PasaheroHome> {
       );
     }
 
-    // push polylines to shared home using public API
     final sharedHomeState = SharedHome.of(context);
     sharedHomeState?.setExternalPolylines(_polylines);
   }
