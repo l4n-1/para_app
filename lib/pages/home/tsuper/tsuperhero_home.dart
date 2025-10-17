@@ -1,10 +1,9 @@
-// lib/pages/tsuperhero_home.dart
+// lib/pages/tsuper/tsuperhero_home.dart
 import 'package:flutter/material.dart';
 import 'package:firebase_auth/firebase_auth.dart';
 import 'package:cloud_firestore/cloud_firestore.dart';
 import 'package:para2/pages/login/login.dart';
 import 'package:para2/pages/home/shared_home.dart';
-import 'package:para2/pages/settings/profile_settings.dart';
 
 class TsuperheroHome extends StatefulWidget {
   const TsuperheroHome({super.key});
@@ -66,9 +65,7 @@ class _TsuperheroHomeState extends State<TsuperheroHome> {
       ScaffoldMessenger.of(context).showSnackBar(
         SnackBar(
           content: Text(
-            _isOnline
-                ? '🟢 You are now ONLINE'
-                : '🔴 You are now OFFLINE',
+            _isOnline ? '🟢 You are now ONLINE' : '🔴 You are now OFFLINE',
           ),
           duration: const Duration(seconds: 2),
         ),
@@ -76,6 +73,16 @@ class _TsuperheroHomeState extends State<TsuperheroHome> {
     } catch (e) {
       debugPrint('Error updating online status: $e');
     }
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    return SharedHome(
+      roleLabel: 'TSUPERHERO',
+      onSignOut: _handleSignOut,
+      roleContent: _buildDriverContent(),
+      roleMenu: _buildDriverMenu(),
+    );
   }
 
   /// 🚌 Main driver action button
@@ -94,17 +101,10 @@ class _TsuperheroHomeState extends State<TsuperheroHome> {
               borderRadius: BorderRadius.circular(30),
             ),
           ),
-          icon: Icon(
-            _isOnline ? Icons.power_settings_new : Icons.play_arrow,
-            color: Colors.white,
-          ),
+          icon: Icon(_isOnline ? Icons.power_settings_new : Icons.play_arrow, color: Colors.white),
           label: Text(
             _isOnline ? 'Go Offline' : 'Go Online',
-            style: const TextStyle(
-              fontWeight: FontWeight.bold,
-              fontSize: 16,
-              color: Colors.white,
-            ),
+            style: const TextStyle(fontWeight: FontWeight.bold, fontSize: 16, color: Colors.white),
           ),
         ),
       ),
@@ -130,10 +130,7 @@ class _TsuperheroHomeState extends State<TsuperheroHome> {
         leading: const Icon(Icons.person),
         title: const Text('Profile Settings'),
         onTap: () {
-          Navigator.push(
-            context,
-            MaterialPageRoute(builder: (_) => const ProfileSettingsPage()),
-          );
+          // open profile settings
         },
       ),
       ListTile(
@@ -142,15 +139,5 @@ class _TsuperheroHomeState extends State<TsuperheroHome> {
         onTap: () {},
       ),
     ];
-  }
-
-  @override
-  Widget build(BuildContext context) {
-    return SharedHome(
-      roleLabel: 'TSUPERHERO',
-      onSignOut: _handleSignOut,
-      roleContent: _buildDriverContent(),
-      roleMenu: _buildDriverMenu(),
-    );
   }
 }

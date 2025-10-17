@@ -1,20 +1,27 @@
+// lib/pages/home/shared_home.dart
 import 'dart:async';
+import 'dart:math' as math;
 import 'package:flutter/material.dart';
 import 'package:google_maps_flutter/google_maps_flutter.dart';
 import 'package:geolocator/geolocator.dart';
 import 'package:firebase_auth/firebase_auth.dart';
 import 'package:cloud_firestore/cloud_firestore.dart';
+import 'package:firebase_database/firebase_database.dart';
 import 'package:para2/pages/settings/profile_settings.dart';
 
-/// SharedHome — unified layout for Pasahero and Tsuperhero.
-/// Shows Google Map, side panel, and handles role-specific overlays.
 class SharedHome extends StatefulWidget {
   final String roleLabel;
   final Future<void> Function()? onSignOut;
   final Widget? roleContent;
   final List<Widget>? roleMenu;
-  final Widget Function(BuildContext context, String displayName)?
-  roleContentBuilder;
+
+  /// Builder with: (context, displayName, userLocation, onMapTap)
+  final Widget Function(
+      BuildContext context,
+      String displayName,
+      LatLng? userLocation,
+      void Function(LatLng picked),
+      )? roleContentBuilder;
 
   const SharedHome({
     super.key,
@@ -31,14 +38,16 @@ class SharedHome extends StatefulWidget {
 
 class _SharedHomeState extends State<SharedHome> with TickerProviderStateMixin {
   final Completer<GoogleMapController> _mapController = Completer();
+  final Map<String, Marker> _jeepMarkers = {};
+  final Map<PolylineId, Polyline> _polylines = {};
   final Map<MarkerId, Marker> _markers = {};
   StreamSubscription<Position>? _positionSub;
+  StreamSubscription<DatabaseEvent>? _devicesSub;
   StreamSubscription<DocumentSnapshot>? _userListener;
 
   bool _mapReady = false;
   bool _isPanelOpen = false;
   final bool _enableLocationStream = true;
-
   bool _isProfileIncomplete = false;
   bool _featuresLocked = false;
 
@@ -46,9 +55,9 @@ class _SharedHomeState extends State<SharedHome> with TickerProviderStateMixin {
   late final Animation<Offset> _panelOffset;
 
   String _displayName = 'Username';
+  LatLng? _userLocation;
 
   static const Duration _panelAnimDuration = Duration(milliseconds: 300);
-
   static const CameraPosition _initialCamera = CameraPosition(
     target: LatLng(14.5995, 120.9842),
     zoom: 14,
@@ -56,16 +65,20 @@ class _SharedHomeState extends State<SharedHome> with TickerProviderStateMixin {
 
   final FirebaseAuth _auth = FirebaseAuth.instance;
   final FirebaseFirestore _firestore = FirebaseFirestore.instance;
+  final FirebaseDatabase _realtime = FirebaseDatabase.instance;
+
+  BitmapDescriptor? _jeepIcon;
+
+  // Tracking state
+  String? _trackedJeepId;
+  bool _followTrackedJeep = true;
+  double? _trackedETA; // in minutes
 
   @override
   void initState() {
     super.initState();
-
-    _panelController = AnimationController(
-      vsync: this,
-      duration: _panelAnimDuration,
-    );
-
+    _panelController =
+        AnimationController(vsync: this, duration: _panelAnimDuration);
     _panelOffset = Tween<Offset>(
       begin: const Offset(-1.0, 0.0),
       end: Offset.zero,
@@ -73,11 +86,23 @@ class _SharedHomeState extends State<SharedHome> with TickerProviderStateMixin {
       CurvedAnimation(parent: _panelController, curve: Curves.easeInOut),
     );
 
+    _loadAssets();
     _listenToUserData();
     _initLocationAndMap();
+    _subscribeDevicesRealtime();
   }
 
-  /// 🔁 Live Firestore listener for profile + display name updates
+  Future<void> _loadAssets() async {
+    try {
+      _jeepIcon = await BitmapDescriptor.fromAssetImage(
+        const ImageConfiguration(size: Size(48, 48)),
+        'assets/JEEP LOGO.png',
+      );
+    } catch (_) {
+      _jeepIcon = BitmapDescriptor.defaultMarker;
+    }
+  }
+
   void _listenToUserData() {
     final user = _auth.currentUser;
     if (user == null) return;
@@ -85,9 +110,7 @@ class _SharedHomeState extends State<SharedHome> with TickerProviderStateMixin {
     _userListener?.cancel();
     _userListener =
         _firestore.collection('users').doc(user.uid).snapshots().listen((doc) {
-          // ⚙️ simplified — .exists is never null
           if (!doc.exists) return;
-
           final data = doc.data() ?? {};
 
           final missingFields = [
@@ -116,7 +139,6 @@ class _SharedHomeState extends State<SharedHome> with TickerProviderStateMixin {
         });
   }
 
-  /// 🧭 Initialize map and location with proper user feedback
   Future<void> _initLocationAndMap() async {
     try {
       LocationPermission permission = await Geolocator.checkPermission();
@@ -126,7 +148,6 @@ class _SharedHomeState extends State<SharedHome> with TickerProviderStateMixin {
 
       if (permission == LocationPermission.deniedForever ||
           permission == LocationPermission.denied) {
-        if (!mounted) return;
         _showLocationErrorDialog(
           title: "Location Permission Denied",
           message:
@@ -142,48 +163,28 @@ class _SharedHomeState extends State<SharedHome> with TickerProviderStateMixin {
         distanceFilter: 5,
       );
 
-      Position pos;
-      try {
-        pos = await Geolocator.getCurrentPosition(
-          locationSettings: locationSettings,
-        );
-      } catch (_) {
-        if (!mounted) return;
-        _showLocationErrorDialog(
-          title: "No Location Found",
-          message:
-          "We couldn’t detect your location. Please check if GPS is turned on.",
-          retryPermission: true,
-        );
-        return;
-      }
-
-      if (!mounted) return;
-      _updateUserMarker(LatLng(pos.latitude, pos.longitude));
+      final pos = await Geolocator.getCurrentPosition(
+        locationSettings: locationSettings,
+      );
+      _userLocation = LatLng(pos.latitude, pos.longitude);
+      _updateUserMarker(_userLocation!);
 
       if (_mapController.isCompleted) {
         final controller = await _mapController.future;
-        if (!mounted) return;
         controller.animateCamera(
-          CameraUpdate.newLatLngZoom(LatLng(pos.latitude, pos.longitude), 16),
+          CameraUpdate.newLatLngZoom(_userLocation!, 16),
         );
       }
 
       if (_enableLocationStream) {
-        _positionSub = Geolocator.getPositionStream(
-          locationSettings: locationSettings,
-        ).listen((Position p) async {
-          final latlng = LatLng(p.latitude, p.longitude);
-          _updateUserMarker(latlng);
-          if (_mapReady && _mapController.isCompleted) {
-            final controller = await _mapController.future;
-            if (!mounted) return;
-            controller.animateCamera(CameraUpdate.newLatLng(latlng));
-          }
-        });
+        _positionSub =
+            Geolocator.getPositionStream(locationSettings: locationSettings)
+                .listen((Position p) {
+              _userLocation = LatLng(p.latitude, p.longitude);
+              _updateUserMarker(_userLocation!);
+            });
       }
-    } catch (e) {
-      if (!mounted) return;
+    } catch (_) {
       _showLocationErrorDialog(
         title: "Error",
         message: "An unexpected error occurred while fetching your location.",
@@ -199,10 +200,8 @@ class _SharedHomeState extends State<SharedHome> with TickerProviderStateMixin {
     bool retryPermission = false,
   }) {
     if (!mounted) return;
-
     showDialog(
       context: context,
-      barrierDismissible: false,
       builder: (_) => AlertDialog(
         title: Text(title),
         content: Text(message),
@@ -211,7 +210,6 @@ class _SharedHomeState extends State<SharedHome> with TickerProviderStateMixin {
             TextButton(
               onPressed: () async {
                 await Geolocator.openAppSettings();
-                if (!mounted) return;
                 Navigator.pop(context);
                 Future.delayed(const Duration(seconds: 2), _initLocationAndMap);
               },
@@ -219,7 +217,6 @@ class _SharedHomeState extends State<SharedHome> with TickerProviderStateMixin {
             ),
           TextButton(
             onPressed: () async {
-              if (!mounted) return;
               Navigator.pop(context);
               if (retryPermission) {
                 await Geolocator.requestPermission();
@@ -244,6 +241,37 @@ class _SharedHomeState extends State<SharedHome> with TickerProviderStateMixin {
     setState(() => _markers[const MarkerId('user_marker')] = marker);
   }
 
+  void _subscribeDevicesRealtime() {
+    _devicesSub = _realtime.ref('devices').onValue.listen((event) {
+      final raw = event.snapshot.value;
+      if (raw == null) return;
+      final Map devices = (raw is Map) ? raw : {};
+
+      devices.forEach((key, value) {
+        final data = value as Map? ?? {};
+        final lat = double.tryParse(data['latitude']?.toString() ?? '');
+        final lng = double.tryParse(data['longitude']?.toString() ?? '');
+        final speed = double.tryParse(data['speed']?.toString() ?? '0');
+        final course = double.tryParse(data['course']?.toString() ?? '0');
+
+        if (lat == null || lng == null) return;
+
+        _jeepMarkers[key] = Marker(
+          markerId: MarkerId(key),
+          position: LatLng(lat, lng),
+          rotation: course ?? 0,
+          anchor: const Offset(0.5, 0.5),
+          icon: _jeepIcon ?? BitmapDescriptor.defaultMarker,
+          infoWindow: InfoWindow(
+            title: key,
+            snippet: '${(speed ?? 0).toStringAsFixed(1)} km/h',
+          ),
+        );
+      });
+      setState(() {});
+    });
+  }
+
   void _togglePanel() {
     setState(() {
       _isPanelOpen = !_isPanelOpen;
@@ -255,6 +283,7 @@ class _SharedHomeState extends State<SharedHome> with TickerProviderStateMixin {
   void dispose() {
     _userListener?.cancel();
     _positionSub?.cancel();
+    _devicesSub?.cancel();
     _panelController.dispose();
     super.dispose();
   }
@@ -272,10 +301,8 @@ class _SharedHomeState extends State<SharedHome> with TickerProviderStateMixin {
               initialCameraPosition: _initialCamera,
               myLocationEnabled: false,
               zoomControlsEnabled: false,
-              zoomGesturesEnabled: !_featuresLocked,
-              scrollGesturesEnabled: !_featuresLocked,
-              rotateGesturesEnabled: !_featuresLocked,
-              markers: Set<Marker>.of(_markers.values),
+              markers: {..._markers.values, ..._jeepMarkers.values}.toSet(),
+              polylines: _polylines.values.toSet(),
               onMapCreated: (controller) {
                 if (!_mapController.isCompleted) {
                   _mapController.complete(controller);
@@ -285,14 +312,14 @@ class _SharedHomeState extends State<SharedHome> with TickerProviderStateMixin {
             ),
           ),
 
-          // ⚠️ Profile Incomplete Banner
+          // ⚠️ Profile incomplete banner
           if (_isProfileIncomplete)
             Positioned(
               top: 80,
               left: 0,
               right: 0,
               child: Container(
-                color: Colors.amber.withValues(alpha: 0.8),
+                color: Colors.amber.withOpacity(0.9),
                 padding:
                 const EdgeInsets.symmetric(horizontal: 16, vertical: 10),
                 child: Row(
@@ -302,10 +329,9 @@ class _SharedHomeState extends State<SharedHome> with TickerProviderStateMixin {
                       child: Text(
                         "⚠️ Please complete your profile to unlock all features.",
                         style: TextStyle(
-                          fontSize: 13,
-                          fontWeight: FontWeight.w500,
-                          color: Colors.black87,
-                        ),
+                            fontSize: 13,
+                            fontWeight: FontWeight.w500,
+                            color: Colors.black87),
                       ),
                     ),
                     TextButton(
@@ -313,16 +339,14 @@ class _SharedHomeState extends State<SharedHome> with TickerProviderStateMixin {
                         Navigator.push(
                           context,
                           MaterialPageRoute(
-                            builder: (_) => const ProfileSettingsPage(),
-                          ),
+                              builder: (_) => const ProfileSettingsPage()),
                         );
                       },
                       child: const Text(
                         "Complete Now",
                         style: TextStyle(
-                          color: Colors.blueAccent,
-                          fontWeight: FontWeight.bold,
-                        ),
+                            color: Colors.blueAccent,
+                            fontWeight: FontWeight.bold),
                       ),
                     ),
                   ],
@@ -330,26 +354,25 @@ class _SharedHomeState extends State<SharedHome> with TickerProviderStateMixin {
               ),
             ),
 
-          // 🔝 TOP BAR
+          // 🔝 Top bar
           SafeArea(
             child: Padding(
-              padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 8),
+              padding:
+              const EdgeInsets.symmetric(horizontal: 12, vertical: 8),
               child: Row(
                 children: [
                   GestureDetector(
                     onTap: _togglePanel,
                     child: Container(
                       padding: const EdgeInsets.symmetric(
-                        horizontal: 12,
-                        vertical: 8,
-                      ),
+                          horizontal: 12, vertical: 8),
                       decoration: BoxDecoration(
                         color: Colors.white,
                         borderRadius: BorderRadius.circular(12),
                         boxShadow: [
                           BoxShadow(
-                            color: Colors.black.withValues(alpha: 0.08),
-                            blurRadius: 6,
+                            color: Colors.black.withOpacity(0.1),
+                            blurRadius: 5,
                           ),
                         ],
                       ),
@@ -366,9 +389,7 @@ class _SharedHomeState extends State<SharedHome> with TickerProviderStateMixin {
                           Text(
                             _displayName,
                             style: const TextStyle(
-                              fontWeight: FontWeight.w600,
-                              fontSize: 14,
-                            ),
+                                fontWeight: FontWeight.w600, fontSize: 14),
                           ),
                         ],
                       ),
@@ -379,9 +400,9 @@ class _SharedHomeState extends State<SharedHome> with TickerProviderStateMixin {
                     "PARA!",
                     style: TextStyle(
                       fontWeight: FontWeight.bold,
-                      fontSize: 16,
+                      fontSize: 18,
                       color: Colors.white,
-                      shadows: [Shadow(color: Colors.black38, blurRadius: 3)],
+                      shadows: [Shadow(color: Colors.black38, blurRadius: 4)],
                     ),
                   ),
                 ],
@@ -389,21 +410,20 @@ class _SharedHomeState extends State<SharedHome> with TickerProviderStateMixin {
             ),
           ),
 
-          // 🌫️ OVERLAY
+          // 🌫️ Overlay when side panel open
           if (_isPanelOpen)
             Positioned.fill(
               child: GestureDetector(
                 onTap: _togglePanel,
-                child: Container(color: Colors.black.withValues(alpha: 0.35)),
+                child: Container(color: Colors.black.withOpacity(0.35)),
               ),
             ),
 
-          // 📋 SIDE PANEL
+          // 📋 Side Panel
           Align(
             alignment: Alignment.centerLeft,
             child: SizedBox(
               width: panelWidth,
-              height: MediaQuery.of(context).size.height,
               child: SlideTransition(
                 position: _panelOffset,
                 child: _buildSidePanel(context),
@@ -411,9 +431,14 @@ class _SharedHomeState extends State<SharedHome> with TickerProviderStateMixin {
             ),
           ),
 
-          // 🎯 ROLE OVERLAY
+          // 🎯 Role overlay
           if (widget.roleContentBuilder != null)
-            widget.roleContentBuilder!(context, _displayName)
+            widget.roleContentBuilder!(
+              context,
+              _displayName,
+              _userLocation,
+                  (LatLng picked) {},
+            )
           else if (widget.roleContent != null)
             widget.roleContent!,
         ],
@@ -430,14 +455,9 @@ class _SharedHomeState extends State<SharedHome> with TickerProviderStateMixin {
           child: Column(
             children: [
               Container(
-                width: double.infinity,
-                padding: const EdgeInsets.symmetric(horizontal: 18, vertical: 20),
-                decoration: BoxDecoration(
-                  color: Colors.grey[100],
-                  borderRadius: const BorderRadius.only(
-                    bottomRight: Radius.circular(20),
-                  ),
-                ),
+                padding:
+                const EdgeInsets.symmetric(horizontal: 18, vertical: 20),
+                color: Colors.grey[100],
                 child: Row(
                   children: [
                     CircleAvatar(
@@ -452,27 +472,19 @@ class _SharedHomeState extends State<SharedHome> with TickerProviderStateMixin {
                       ),
                     ),
                     const SizedBox(width: 12),
-                    Flexible(
-                      child: Column(
-                        crossAxisAlignment: CrossAxisAlignment.start,
-                        children: [
-                          Text(
-                            _displayName,
+                    Column(
+                      crossAxisAlignment: CrossAxisAlignment.start,
+                      children: [
+                        Text(
+                          _displayName,
+                          style: const TextStyle(
+                              fontWeight: FontWeight.bold, fontSize: 16),
+                        ),
+                        const SizedBox(height: 4),
+                        Text(widget.roleLabel,
                             style: const TextStyle(
-                              fontWeight: FontWeight.bold,
-                              fontSize: 16,
-                            ),
-                          ),
-                          const SizedBox(height: 4),
-                          Text(
-                            widget.roleLabel,
-                            style: const TextStyle(
-                              color: Colors.black54,
-                              fontSize: 12,
-                            ),
-                          ),
-                        ],
-                      ),
+                                color: Colors.black54, fontSize: 12)),
+                      ],
                     ),
                   ],
                 ),
@@ -481,14 +493,12 @@ class _SharedHomeState extends State<SharedHome> with TickerProviderStateMixin {
               ListTile(
                 leading: const Icon(Icons.person),
                 title: const Text('Profile Settings'),
-                onTap: () {
-                  Navigator.push(
-                    context,
-                    MaterialPageRoute(
-                      builder: (_) => const ProfileSettingsPage(),
-                    ),
-                  );
-                },
+                onTap: () => Navigator.push(
+                  context,
+                  MaterialPageRoute(
+                    builder: (_) => const ProfileSettingsPage(),
+                  ),
+                ),
               ),
               ListTile(
                 leading: const Icon(Icons.logout),
@@ -497,15 +507,13 @@ class _SharedHomeState extends State<SharedHome> with TickerProviderStateMixin {
               ),
               const Divider(),
               Padding(
-                padding: const EdgeInsets.symmetric(vertical: 18.0),
+                padding: const EdgeInsets.symmetric(vertical: 18),
                 child: Column(
                   children: [
                     Image.asset('assets/Paralogotemp.png', height: 48),
                     const SizedBox(height: 8),
-                    const Text(
-                      'PARA! - Transport App',
-                      style: TextStyle(color: Colors.black54),
-                    ),
+                    const Text('PARA! - Transport App',
+                        style: TextStyle(color: Colors.black54)),
                   ],
                 ),
               ),
