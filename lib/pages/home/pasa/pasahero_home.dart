@@ -1,3 +1,4 @@
+// lib/pages/home/pasahero_home.dart
 import 'package:flutter/material.dart';
 import 'package:firebase_auth/firebase_auth.dart';
 import 'package:firebase_database/firebase_database.dart';
@@ -29,7 +30,6 @@ class _PasaheroHomeState extends State<PasaheroHome> {
 
   Map<String, Map<String, dynamic>> _jeepneys = {};
   Stream<DatabaseEvent>? _rtdbStream;
-
   final Set<Polyline> _polylines = {};
 
   @override
@@ -48,9 +48,9 @@ class _PasaheroHomeState extends State<PasaheroHome> {
       final updated = <String, Map<String, dynamic>>{};
       jeeps.forEach((id, data) {
         if (data is Map) {
-          final lat = _toDouble(data['latitude']);
-          final lng = _toDouble(data['longitude']);
-          final speed = _toDouble(data['speed']);
+          final lat = _toDouble(data['latitude'] ?? data['lat']);
+          final lng = _toDouble(data['longitude'] ?? data['lng']);
+          final speed = _toDouble(data['speed_kmh'] ?? data['speed']);
           final course = _toDouble(data['course']);
           if (lat != null && lng != null) {
             updated[id] = {
@@ -78,26 +78,27 @@ class _PasaheroHomeState extends State<PasaheroHome> {
     return null;
   }
 
+  double _degToRad(double deg) => deg * math.pi / 180;
   double _distanceKm(LatLng a, LatLng b) {
     const R = 6371;
     final dLat = _degToRad(b.latitude - a.latitude);
     final dLon = _degToRad(b.longitude - a.longitude);
     final rLat1 = _degToRad(a.latitude);
     final rLat2 = _degToRad(b.latitude);
-    final aVal = math.sin(dLat / 2) * math.sin(dLat / 2) +
-        math.cos(rLat1) * math.cos(rLat2) *
-            math.sin(dLon / 2) * math.sin(dLon / 2);
+    final aVal =
+        math.sin(dLat / 2) * math.sin(dLat / 2) +
+        math.cos(rLat1) *
+            math.cos(rLat2) *
+            math.sin(dLon / 2) *
+            math.sin(dLon / 2);
     final c = 2 * math.atan2(math.sqrt(aVal), math.sqrt(1 - aVal));
     return R * c;
   }
 
-  double _degToRad(double deg) => deg * math.pi / 180;
-
   double _computeETA(LatLng from, LatLng to, double speedKmh) {
     final dist = _distanceKm(from, to);
     if (speedKmh <= 0) return double.infinity;
-    final timeH = dist / speedKmh;
-    return timeH * 60; // minutes
+    return (dist / speedKmh) * 60; // minutes
   }
 
   Future<void> _handleSignOut() async {
@@ -125,7 +126,6 @@ class _PasaheroHomeState extends State<PasaheroHome> {
       icon: BitmapDescriptor.defaultMarkerWithHue(BitmapDescriptor.hueRed),
     );
 
-    // ✅ Now this line works perfectly
     final sharedHomeState = SharedHome.of(context);
     sharedHomeState?.addOrUpdateMarker(
       const MarkerId('destination_marker'),
@@ -133,9 +133,7 @@ class _PasaheroHomeState extends State<PasaheroHome> {
     );
 
     final controller = await sharedHomeState?.getMapController();
-    if (controller != null) {
-      controller.animateCamera(CameraUpdate.newLatLngZoom(position, 16));
-    }
+    await controller?.animateCamera(CameraUpdate.newLatLngZoom(position, 16));
 
     ScaffoldMessenger.of(context).showSnackBar(
       const SnackBar(content: Text('📍 Destination set! Choose a jeepney.')),
@@ -146,35 +144,42 @@ class _PasaheroHomeState extends State<PasaheroHome> {
     _polylines.clear();
     if (_userLoc == null) return;
 
-    // Show Pasahero → Jeepney line
-    if (_hasSelectedJeep && _selectedJeepId != null && _jeepneys[_selectedJeepId] != null) {
+    if (_hasSelectedJeep &&
+        _selectedJeepId != null &&
+        _jeepneys[_selectedJeepId] != null) {
       final jeepData = _jeepneys[_selectedJeepId]!;
       final jeepPos = LatLng(jeepData['lat'], jeepData['lng']);
-      _polylines.add(Polyline(
-        polylineId: const PolylineId("trackingLine"),
-        visible: true,
-        color: Colors.green,
-        width: 4,
-        points: [_userLoc!, jeepPos],
-      ));
+      _polylines.add(
+        Polyline(
+          polylineId: const PolylineId("trackingLine"),
+          visible: true,
+          color: Colors.green,
+          width: 4,
+          points: [_userLoc!, jeepPos],
+        ),
+      );
     }
 
-    // Show Pasahero → Destination line (optional visual)
     if (_destination != null) {
-      _polylines.add(Polyline(
-        polylineId: const PolylineId("destinationLine"),
-        color: Colors.blueAccent,
-        width: 3,
-        points: [_userLoc!, _destination!],
-      ));
+      _polylines.add(
+        Polyline(
+          polylineId: const PolylineId("destinationLine"),
+          color: Colors.blueAccent,
+          width: 3,
+          points: [_userLoc!, _destination!],
+        ),
+      );
     }
+
+    // push polylines to shared home using public API
+    final sharedHomeState = SharedHome.of(context);
+    sharedHomeState?.setExternalPolylines(_polylines);
   }
 
   Widget _buildJeepneySuggestionList() {
     if (!_hasSetDestination) return const SizedBox.shrink();
-    if (_jeepneys.isEmpty) {
+    if (_jeepneys.isEmpty)
       return _buildInfoCard("No active jeepneys found nearby.");
-    }
 
     return Container(
       margin: const EdgeInsets.all(16),
@@ -200,6 +205,7 @@ class _PasaheroHomeState extends State<PasaheroHome> {
             if (data['lat'] != null && data['lng'] != null) {
               jeepPos = LatLng(data['lat'], data['lng']);
             }
+
             double? eta;
             if (jeepPos != null && _userLoc != null) {
               eta = _computeETA(jeepPos, _userLoc!, data['speed'] ?? 20);
@@ -233,20 +239,18 @@ class _PasaheroHomeState extends State<PasaheroHome> {
     );
   }
 
-  Widget _buildInfoCard(String message) {
-    return Container(
-      margin: const EdgeInsets.all(16),
-      padding: const EdgeInsets.all(12),
-      decoration: BoxDecoration(
-        color: Colors.white,
-        borderRadius: BorderRadius.circular(12),
-        boxShadow: [
-          BoxShadow(color: Colors.black.withOpacity(0.1), blurRadius: 8),
-        ],
-      ),
-      child: Center(child: Text(message)),
-    );
-  }
+  Widget _buildInfoCard(String message) => Container(
+    margin: const EdgeInsets.all(16),
+    padding: const EdgeInsets.all(12),
+    decoration: BoxDecoration(
+      color: Colors.white,
+      borderRadius: BorderRadius.circular(12),
+      boxShadow: [
+        BoxShadow(color: Colors.black.withOpacity(0.1), blurRadius: 8),
+      ],
+    ),
+    child: Center(child: Text(message)),
+  );
 
   Widget _buildParaButton() {
     final isEnabled = _hasSetDestination && _hasSelectedJeep;
@@ -256,18 +260,16 @@ class _PasaheroHomeState extends State<PasaheroHome> {
         padding: const EdgeInsets.only(bottom: 40.0),
         child: ElevatedButton(
           onPressed: isEnabled
-              ? () {
-            ScaffoldMessenger.of(context).showSnackBar(
-              SnackBar(
-                content: Text(
-                    '🚍 PARA! signal sent to jeepney $_selectedJeepId'),
-              ),
-            );
-          }
+              ? () => ScaffoldMessenger.of(context).showSnackBar(
+                  SnackBar(
+                    content: Text('🚍 PARA! signal sent to $_selectedJeepId'),
+                  ),
+                )
               : null,
           style: ElevatedButton.styleFrom(
-            backgroundColor:
-            isEnabled ? Colors.greenAccent.shade700 : Colors.grey,
+            backgroundColor: isEnabled
+                ? Colors.greenAccent.shade700
+                : Colors.grey,
             padding: const EdgeInsets.symmetric(horizontal: 40, vertical: 14),
             shape: RoundedRectangleBorder(
               borderRadius: BorderRadius.circular(30),
@@ -286,8 +288,12 @@ class _PasaheroHomeState extends State<PasaheroHome> {
     );
   }
 
-  Widget _buildRoleContent(BuildContext context, String displayName,
-      LatLng? userLoc, void Function(LatLng) onTap) {
+  Widget _buildRoleContent(
+    BuildContext context,
+    String displayName,
+    LatLng? userLoc,
+    void Function(LatLng) onTap,
+  ) {
     _userLoc = userLoc;
     _updatePolyline();
 
@@ -308,7 +314,9 @@ class _PasaheroHomeState extends State<PasaheroHome> {
                 "👆 Tap anywhere on the map to set your destination!",
                 textAlign: TextAlign.center,
                 style: TextStyle(
-                    color: Colors.white, fontWeight: FontWeight.w600),
+                  color: Colors.white,
+                  fontWeight: FontWeight.w600,
+                ),
               ),
             ),
           ),
@@ -324,11 +332,10 @@ class _PasaheroHomeState extends State<PasaheroHome> {
             bottom: 200,
             right: 20,
             child: FloatingActionButton.small(
-              backgroundColor:
-              _isFollowing ? Colors.blueAccent : Colors.grey.shade400,
-              onPressed: () {
-                setState(() => _isFollowing = !_isFollowing);
-              },
+              backgroundColor: _isFollowing
+                  ? Colors.blueAccent
+                  : Colors.grey.shade400,
+              onPressed: () => setState(() => _isFollowing = !_isFollowing),
               child: Icon(
                 _isFollowing ? Icons.gps_fixed : Icons.gps_off,
                 color: Colors.white,
@@ -347,6 +354,8 @@ class _PasaheroHomeState extends State<PasaheroHome> {
                   _selectedJeepId = null;
                   _polylines.clear();
                 });
+                final sharedHomeState = SharedHome.of(context);
+                sharedHomeState?.clearExternalPolylines();
               },
               child: const Icon(Icons.close, color: Colors.white),
             ),
@@ -355,35 +364,33 @@ class _PasaheroHomeState extends State<PasaheroHome> {
     );
   }
 
-  List<Widget> _buildPasaheroMenu() {
-    return [
-      ListTile(
-        leading: const Icon(Icons.history),
-        title: const Text('Trip History'),
-        onTap: () {},
-      ),
-      ListTile(
-        leading: const Icon(Icons.settings),
-        title: const Text('Settings'),
-        onTap: () {},
-      ),
-      ListTile(
-        leading: const Icon(Icons.help),
-        title: const Text('Help'),
-        onTap: () {},
-      ),
-      ListTile(
-        leading: const Icon(Icons.qr_code_2),
-        title: const Text('Scan QR to Become Tsuperhero'),
-        onTap: () {
-          Navigator.push(
-            context,
-            MaterialPageRoute(builder: (_) => const QRScanPage()),
-          );
-        },
-      ),
-    ];
-  }
+  List<Widget> _buildPasaheroMenu() => [
+    ListTile(
+      leading: const Icon(Icons.history),
+      title: const Text('Trip History'),
+      onTap: () {},
+    ),
+    ListTile(
+      leading: const Icon(Icons.settings),
+      title: const Text('Settings'),
+      onTap: () {},
+    ),
+    ListTile(
+      leading: const Icon(Icons.help),
+      title: const Text('Help'),
+      onTap: () {},
+    ),
+    ListTile(
+      leading: const Icon(Icons.qr_code_2),
+      title: const Text('Scan QR to Become Tsuperhero'),
+      onTap: () {
+        Navigator.push(
+          context,
+          MaterialPageRoute(builder: (_) => const QRScanPage()),
+        );
+      },
+    ),
+  ];
 
   @override
   Widget build(BuildContext context) {

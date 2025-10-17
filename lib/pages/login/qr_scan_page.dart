@@ -3,7 +3,7 @@ import 'package:flutter/material.dart';
 import 'package:mobile_scanner/mobile_scanner.dart';
 import 'package:firebase_auth/firebase_auth.dart';
 import 'package:cloud_firestore/cloud_firestore.dart';
-import 'package:http/http.dart' as http; // 👈 for calling the Cloud Function
+import 'package:http/http.dart' as http;
 import 'package:para2/pages/home/role_router.dart';
 import 'package:para2/pages/login/tsuperhero_signup_page.dart';
 
@@ -18,9 +18,7 @@ class _QRScanPageState extends State<QRScanPage> {
   final MobileScannerController _controller = MobileScannerController();
   bool _isProcessing = false;
 
-  // 🔗 Change this to your deployed Firebase Function URL
-  // Example:
-  // const String functionUrl = "https://us-central1-YOUR_PROJECT.cloudfunctions.net/claimBaryaBox";
+  // 🔗 Replace this with your deployed Firebase Function URL
   final String functionUrl = "https://claimbaryabox-elu2otbf7q-uc.a.run.app";
 
   Future<void> _handleQRCode(String code) async {
@@ -30,43 +28,58 @@ class _QRScanPageState extends State<QRScanPage> {
     try {
       final auth = FirebaseAuth.instance;
       final currentUser = auth.currentUser;
-      final scannedId = code.trim();
 
-      debugPrint("📦 Scanned QR: $scannedId");
+      debugPrint("📦 Raw scanned QR: $code");
+
+      // ✅ Parse JSON or fallback to plain deviceId
+      String deviceId;
+      try {
+        final parsed = jsonDecode(code);
+        deviceId = parsed['deviceId'] ?? code.trim();
+      } catch (_) {
+        deviceId = code.trim();
+      }
+
+      debugPrint("✅ Parsed Device ID: $deviceId");
 
       if (currentUser == null) {
-        // 🔐 Not logged in → redirect to Tsuperhero signup page with QR
+        // 🔐 Redirect to signup if not logged in
         Navigator.pushReplacement(
           context,
           MaterialPageRoute(
-            builder: (_) => TsuperheroSignupPage(scannedId: scannedId),
+            builder: (_) => TsuperheroSignupPage(scannedId: deviceId),
           ),
         );
         return;
       }
 
-      // ✅ Logged in → claim the box through the Cloud Function
+      // ✅ Send claim request
       final uid = currentUser.uid;
       final response = await http.post(
         Uri.parse(functionUrl),
         headers: {'Content-Type': 'application/json'},
-        body: jsonEncode({'deviceId': scannedId, 'uid': uid}),
+        body: jsonEncode({'deviceId': deviceId, 'uid': uid}),
       );
 
       final result = jsonDecode(response.body);
       debugPrint("🌐 Function response: $result");
 
       if (response.statusCode == 200 && result['success'] == true) {
-        // Update Firestore user role locally (optional for redundancy)
+        // ✅ Update Firestore user data
         await FirebaseFirestore.instance.collection('users').doc(uid).set({
           'role': 'tsuperhero',
+          'boxClaimed': deviceId,
         }, SetOptions(merge: true));
 
         ScaffoldMessenger.of(context).showSnackBar(
-          SnackBar(content: Text(result['message'] ?? 'Claim successful!')),
+          SnackBar(
+            content: Text(
+              result['message'] ?? 'Claimed $deviceId successfully!',
+            ),
+          ),
         );
 
-        // Redirect to RoleRouter (dashboard)
+        // ✅ Redirect to dashboard
         Navigator.pushReplacement(
           context,
           MaterialPageRoute(builder: (_) => const RoleRouter()),
