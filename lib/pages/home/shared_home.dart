@@ -36,6 +36,12 @@ class SharedHome extends StatefulWidget {
     this.onMapTap, // ✅ added to constructor
   });
 
+  // ✅ Add this inside class SharedHome (NOT inside _SharedHomeState)
+  static _SharedHomeState? of(BuildContext context) {
+    final state = context.findAncestorStateOfType<_SharedHomeState>();
+    return state;
+  }
+
   @override
   State<SharedHome> createState() => _SharedHomeState();
 }
@@ -278,6 +284,14 @@ class _SharedHomeState extends State<SharedHome> with TickerProviderStateMixin {
       _isPanelOpen = !_isPanelOpen;
       _isPanelOpen ? _panelController.forward() : _panelController.reverse();
     });
+  }
+
+  /// ✅ Public accessor to get the GoogleMapController safely
+  Future<GoogleMapController?> getMapController() async {
+    if (_mapController.isCompleted) {
+      return _mapController.future;
+    }
+    return null;
   }
 
   /// 🟢 Public method that Pasahero can call to add a custom marker.

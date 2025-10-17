@@ -118,7 +118,6 @@ class _PasaheroHomeState extends State<PasaheroHome> {
       _selectedJeepId = null;
     });
 
-    // ✅ Build the destination marker
     final destMarker = Marker(
       markerId: const MarkerId('destination_marker'),
       position: position,
@@ -126,15 +125,14 @@ class _PasaheroHomeState extends State<PasaheroHome> {
       icon: BitmapDescriptor.defaultMarkerWithHue(BitmapDescriptor.hueRed),
     );
 
-    // ✅ Access the SharedHome state safely and call its helper method
+    // ✅ Now this line works perfectly
     final sharedHomeState = SharedHome.of(context);
     sharedHomeState?.addOrUpdateMarker(
       const MarkerId('destination_marker'),
       destMarker,
     );
 
-    // ✅ Zoom the camera to the tapped spot
-    final controller = await sharedHomeState?._mapController.future;
+    final controller = await sharedHomeState?.getMapController();
     if (controller != null) {
       controller.animateCamera(CameraUpdate.newLatLngZoom(position, 16));
     }
