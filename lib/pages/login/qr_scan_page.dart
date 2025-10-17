@@ -1,7 +1,9 @@
+import 'dart:convert';
 import 'package:flutter/material.dart';
 import 'package:mobile_scanner/mobile_scanner.dart';
-import 'package:cloud_firestore/cloud_firestore.dart';
 import 'package:firebase_auth/firebase_auth.dart';
+import 'package:cloud_firestore/cloud_firestore.dart';
+import 'package:http/http.dart' as http; // 👈 for calling the Cloud Function
 import 'package:para2/pages/home/role_router.dart';
 import 'package:para2/pages/login/tsuperhero_signup_page.dart';
 
@@ -16,47 +18,68 @@ class _QRScanPageState extends State<QRScanPage> {
   final MobileScannerController _controller = MobileScannerController();
   bool _isProcessing = false;
 
+  // 🔗 Change this to your deployed Firebase Function URL
+  // Example:
+  // const String functionUrl = "https://us-central1-YOUR_PROJECT.cloudfunctions.net/claimBaryaBox";
+  final String functionUrl = "https://claimbaryabox-elu2otbf7q-uc.a.run.app";
+
   Future<void> _handleQRCode(String code) async {
     if (_isProcessing) return;
     setState(() => _isProcessing = true);
 
     try {
-      final firestore = FirebaseFirestore.instance;
       final auth = FirebaseAuth.instance;
-
-      // Assume QR code contains a unique jeepney or driver ID
-      final scannedId = code.trim();
-      debugPrint("Scanned QR: $scannedId");
-
       final currentUser = auth.currentUser;
+      final scannedId = code.trim();
 
-      if (currentUser != null) {
-        // ✅ Already logged in — promote to tsuperhero
-        await firestore.collection('users').doc(currentUser.uid).set({
-          'role': 'tsuperhero',
-          'linkedJeepneyId': scannedId, // optional
-        }, SetOptions(merge: true));
+      debugPrint("📦 Scanned QR: $scannedId");
 
-        ScaffoldMessenger.of(context).showSnackBar(
-          const SnackBar(
-            content: Text('Your role has been updated to Tsuperhero!'),
-          ),
-        );
-
-        Navigator.pushReplacement(
-          context,
-          MaterialPageRoute(builder: (_) => const RoleRouter()),
-        );
-      } else {
-        // 🆕 Not logged in — redirect to signup with QR info
+      if (currentUser == null) {
+        // 🔐 Not logged in → redirect to Tsuperhero signup page with QR
         Navigator.pushReplacement(
           context,
           MaterialPageRoute(
             builder: (_) => TsuperheroSignupPage(scannedId: scannedId),
           ),
         );
+        return;
+      }
+
+      // ✅ Logged in → claim the box through the Cloud Function
+      final uid = currentUser.uid;
+      final response = await http.post(
+        Uri.parse(functionUrl),
+        headers: {'Content-Type': 'application/json'},
+        body: jsonEncode({'deviceId': scannedId, 'uid': uid}),
+      );
+
+      final result = jsonDecode(response.body);
+      debugPrint("🌐 Function response: $result");
+
+      if (response.statusCode == 200 && result['success'] == true) {
+        // Update Firestore user role locally (optional for redundancy)
+        await FirebaseFirestore.instance.collection('users').doc(uid).set({
+          'role': 'tsuperhero',
+        }, SetOptions(merge: true));
+
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(content: Text(result['message'] ?? 'Claim successful!')),
+        );
+
+        // Redirect to RoleRouter (dashboard)
+        Navigator.pushReplacement(
+          context,
+          MaterialPageRoute(builder: (_) => const RoleRouter()),
+        );
+      } else {
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(
+            content: Text('❌ Failed: ${result['message'] ?? 'Unknown error'}'),
+          ),
+        );
       }
     } catch (e) {
+      debugPrint("⚠️ Error: $e");
       ScaffoldMessenger.of(
         context,
       ).showSnackBar(SnackBar(content: Text('Error: $e')));
@@ -99,7 +122,6 @@ class _QRScanPageState extends State<QRScanPage> {
                 ),
               ),
             ),
-
             if (_isProcessing)
               const Center(
                 child: CircularProgressIndicator(color: Colors.white),
