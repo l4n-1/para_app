@@ -32,6 +32,14 @@ class MapControls extends StatelessWidget {
           ),
           const SizedBox(height: 8),
 
+          // Map theme toggle
+          _MapControlButton(
+            icon: Icons.brightness_6,
+            tooltip: 'Toggle map theme',
+            onPressed: () => ButtonActions.toggleMapTheme(context, mapController),
+          ),
+          const SizedBox(height: 8),
+
           // Trophy Button
           _MapControlButton(
             icon: Icons.emoji_events,

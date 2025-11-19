@@ -11,6 +11,8 @@ import 'package:para2/theme/app_icons.dart';
 import 'package:para2/services/location_service.dart';
 import 'package:para2/pages/settings/PHdashboard.dart';
 import 'package:provider/provider.dart';
+// map theme applied via MapControllerService when controller is set
+import 'package:para2/services/map_controller_service.dart';
 
 class SharedHome extends StatefulWidget {
   final String roleLabel;
@@ -619,12 +621,14 @@ class _SharedHomeState extends State<SharedHome> with TickerProviderStateMixin {
             zoomControlsEnabled: false,
             markers: _getRoleSpecificMarkers(),
             polylines: _polylines.values.toSet(),
-            onMapCreated: (controller) {
+            onMapCreated: (controller) async {
               if (!_mapController.isCompleted) {
                 _mapController.complete(controller);
               }
               setState(() => _isMapReady = true);
               debugPrint("✅ Map controller is ready");
+              // Set the global controller so other parts of the app can access it
+              await MapControllerService.instance.setController(controller);
             },
             onTap: widget.onMapTap,
             onCameraMove: _onCameraMove,

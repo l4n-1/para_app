@@ -1,5 +1,7 @@
 import 'package:flutter/material.dart';
 import 'package:google_maps_flutter/google_maps_flutter.dart';
+import 'map_theme_service.dart';
+import 'map_controller_service.dart';
 
 class ButtonActions {
   // Recenter button action
@@ -70,6 +72,24 @@ class ButtonActions {
   static void toggleCompassMode() {
     // Add compass functionality here
     print('Compass mode toggled');
+  }
+
+  /// Toggle the Google Map theme between light and dark. If a controller is
+  /// provided the style will be applied immediately.
+  static Future<void> toggleMapTheme(
+    BuildContext context,
+    GoogleMapController? controller,
+  ) async {
+    // If caller didn't provide a controller, try the global one
+    final ctrl = controller ?? MapControllerService.instance.current;
+    await MapThemeService.instance.toggle(ctrl);
+    final enabled = MapThemeService.instance.isDarkMode.value;
+    ScaffoldMessenger.of(context).showSnackBar(
+      SnackBar(
+        content: Text(enabled ? 'Map: Dark mode' : 'Map: Light mode'),
+        duration: const Duration(seconds: 1),
+      ),
+    );
   }
 
   // Route planning button

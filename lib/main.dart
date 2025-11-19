@@ -8,11 +8,14 @@ import 'package:para2/pages/login/login.dart';
 import 'package:para2/pages/home/pasa/pasahero_home.dart';
 import "package:para2/pages/home/tsuper/tsuperhero_home.dart";
 import 'package:para2/theme/app_icons.dart';
+import 'package:para2/services/map_theme_service.dart';
 
 void main() async {
   WidgetsFlutterBinding.ensureInitialized();
   await AppIcons.loadIcons(); // ✅ Ensure icons are loaded before app starts
   await Firebase.initializeApp();
+  // Load persisted map theme preference
+  await MapThemeService.instance.init();
   // Enable edge-to-edge mode so app content can extend
   // behind the status and navigation bars (full-screen look).
   SystemChrome.setEnabledSystemUIMode(SystemUiMode.edgeToEdge);

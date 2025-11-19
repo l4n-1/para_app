@@ -12,6 +12,7 @@ import 'dart:math' as math;
 import 'package:para2/theme/app_icons.dart';
 import 'package:para2/pages/settings/profile_settings.dart';
 import 'package:para2/services/RealtimeDatabaseService.dart';
+import 'package:para2/services/button_actions.dart';
 import 'package:para2/widgets/compact_ads_button.dart';
 import 'package:para2/pages/biyahe/biyahe_logs_page.dart';
 
@@ -657,6 +658,12 @@ class _PasaheroHomeState extends State<PasaheroHome> {
           MaterialPageRoute(builder: (_) => const ProfileSettingsPage()),
         );
       },
+      trailing: IconButton(
+        icon: const Icon(Icons.brightness_6),
+        tooltip: 'Toggle map theme',
+        color: Colors.white,
+        onPressed: () => ButtonActions.toggleMapTheme(context, null),
+      ),
     ),
     const Divider(
       color:  Color.fromARGB(255, 52, 46, 53),),
