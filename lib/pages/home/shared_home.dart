@@ -6,7 +6,7 @@ import 'package:cloud_firestore/cloud_firestore.dart';
 import 'package:firebase_auth/firebase_auth.dart';
 import 'package:para2/services/RealtimeDatabaseService.dart';
 import 'package:para2/pages/settings/profile_settings.dart';
-import 'dart:math' as math;
+// math import removed — bearing/rotation calculations are not used
 import 'package:para2/theme/app_icons.dart';
 import 'package:para2/services/location_service.dart';
 import 'package:para2/pages/settings/PHdashboard.dart';
@@ -16,6 +16,7 @@ import 'package:para2/services/map_controller_service.dart';
 import 'package:para2/services/button_actions.dart';
 import 'package:para2/services/follow_service.dart';
 import 'package:para2/services/snackbar_service.dart';
+import 'package:para2/services/location_broadcast.dart';
 
 class SharedHome extends StatefulWidget {
   final String roleLabel;
@@ -72,6 +73,12 @@ class _SharedHomeState extends State<SharedHome> with TickerProviderStateMixin {
   // Zoom tracking
   double _currentZoom = 14.0;
 
+  // Animation controllers for smooth marker movement (uses vsync)
+  final Map<MarkerId, AnimationController> _markerAnimControllers = {};
+
+  // Throttle camera updates to avoid jerky camera movement
+  DateTime? _lastCameraUpdate;
+
   // User coins
   double _userCoins = 0.0;
 
@@ -103,6 +110,15 @@ class _SharedHomeState extends State<SharedHome> with TickerProviderStateMixin {
     _checkProfileCompletion();
     _loadUserDisplayName();
     _loadUserCoins();
+
+    // Subscribe to app-wide location broadcasts so this SharedHome instance
+    // receives live location updates even if callers can't find the ancestor.
+    LocationBroadcast.instance.stream.listen((loc) {
+      debugPrint('LocationBroadcast -> SharedHome: $loc');
+      updateUserLocation(loc);
+    }, onError: (e) {
+      debugPrint('LocationBroadcast error: $e');
+    });
 
     // ✅ ADD: Get initial location
     WidgetsBinding.instance.addPostFrameCallback((_) {
@@ -290,58 +306,106 @@ class _SharedHomeState extends State<SharedHome> with TickerProviderStateMixin {
       _currentUserLoc = userLoc;
     });
 
-    debugPrint("📍 SharedHome received location: $userLoc");
+    final recvTs = DateTime.now().millisecondsSinceEpoch;
+    debugPrint("📍 SharedHome received location: $userLoc (recv_ts=$recvTs)");
 
-    // Update user marker with custom directional icon
-    final userMarker = Marker(
-      markerId: const MarkerId('user_marker'),
-      position: userLoc,
-      icon: _userDirectionalIcon ?? BitmapDescriptor.defaultMarkerWithHue(BitmapDescriptor.hueBlue),
-      infoWindow: const InfoWindow(title: 'Your Location'),
-      anchor: const Offset(0.5, 0.9),
-      flat: true,
-    );
+    // Smoothly animate the user marker from its previous position to the
+    // new position so movement looks smooth instead of jumping in big steps.
+    final markerId = const MarkerId('user_marker');
+    final prev = _markers[markerId];
+    final from = prev?.position ?? userLoc;
 
-    addOrUpdateMarker(const MarkerId('user_marker'), userMarker);
+    _animateMarkerMove(markerId, from, userLoc);
 
     // If follow mode is enabled, animate the camera to the user's position
     // on each live update. Otherwise, only center once if we haven't yet
     // (preserving previous behavior but respecting follow toggle).
     final follow = FollowService.instance.isFollowing.value;
-    if (follow) {
-      if (_isMapReady) {
-        try {
-          final ctrl = await _mapController.future;
-          await ctrl.animateCamera(CameraUpdate.newLatLngZoom(userLoc, 16.0));
-        } catch (e) {
-          debugPrint('Error centering to user location while following: $e');
+    if (_isMapReady) {
+      try {
+        final ctrl = await _mapController.future;
+        final now = DateTime.now();
+        // Only update camera position at most twice per second to avoid
+        // excessive camera jumps while still keeping it responsive.
+        if (follow) {
+          if (_lastCameraUpdate == null || now.difference(_lastCameraUpdate!).inMilliseconds > 333) {
+            await ctrl.animateCamera(CameraUpdate.newLatLng(userLoc));
+            _lastCameraUpdate = now;
+          }
+        } else {
+          if (!_hasCenteredOnUser) {
+            await ctrl.animateCamera(CameraUpdate.newLatLngZoom(userLoc, 16.0));
+            _hasCenteredOnUser = true;
+          }
         }
-      }
-    } else {
-      if (_isMapReady && !_hasCenteredOnUser) {
-        try {
-          final ctrl = await _mapController.future;
-          await ctrl.animateCamera(CameraUpdate.newLatLngZoom(userLoc, 16.0));
-          _hasCenteredOnUser = true;
-        } catch (e) {
-          debugPrint('Error centering to user location: $e');
-        }
+      } catch (e) {
+        debugPrint('Error centering to user location: $e');
       }
     }
   }
 
-  // Helper to get the map controller future safely
-  Future<GoogleMapController> _map_controller_future_or_completer() async {
-    if (_mapController.isCompleted) return _mapController.future;
-    return await _mapController.future;
+  // Smoothly animate a marker from `from` -> `to` by updating the marker
+  // position in small steps. Cancels any existing animation for the same id.
+  void _animateMarkerMove(MarkerId id, LatLng from, LatLng to, {int durationMs = 240}) {
+    // Cancel any existing animation controller for this marker
+    final existing = _markerAnimControllers.remove(id);
+    existing?.stop();
+    existing?.dispose();
+
+    if (from.latitude == to.latitude && from.longitude == to.longitude) {
+      // No movement — just set marker once
+      final m = Marker(
+        markerId: id,
+        position: to,
+        icon: _userDirectionalIcon ?? BitmapDescriptor.defaultMarkerWithHue(BitmapDescriptor.hueBlue),
+        infoWindow: const InfoWindow(title: 'Your Location'),
+        anchor: const Offset(0.5, 0.9),
+        flat: true,
+      );
+      addOrUpdateMarker(id, m);
+      return;
+    }
+
+    final controller = AnimationController(
+      vsync: this,
+      duration: Duration(milliseconds: durationMs),
+    );
+    final animation = CurvedAnimation(parent: controller, curve: Curves.linear);
+
+    animation.addListener(() {
+      final frac = animation.value.clamp(0.0, 1.0);
+      final lat = from.latitude + (to.latitude - from.latitude) * frac;
+      final lng = from.longitude + (to.longitude - from.longitude) * frac;
+
+      final m = Marker(
+        markerId: id,
+        position: LatLng(lat, lng),
+        icon: _userDirectionalIcon ?? BitmapDescriptor.defaultMarkerWithHue(BitmapDescriptor.hueBlue),
+        infoWindow: const InfoWindow(title: 'Your Location'),
+        anchor: const Offset(0.5, 0.9),
+        flat: true,
+      );
+      addOrUpdateMarker(id, m);
+    });
+
+    controller.addStatusListener((status) {
+      if (status == AnimationStatus.completed || status == AnimationStatus.dismissed) {
+        // Cleanup
+        controller.stop();
+        controller.dispose();
+        _markerAnimControllers.remove(id);
+      }
+    });
+
+    _markerAnimControllers[id] = controller;
+    controller.forward();
   }
 
-  // ✅ FIX: Remove the giant red pin by clearing the user marker
-  void _removeUserMarker() {
-    setState(() {
-      _markers.remove(const MarkerId('user_marker'));
-    });
-  }
+  // Bearing calculations removed — user marker remains static (no rotation).
+
+  // (Helper methods removed) — marker management handled via
+  // `addOrUpdateMarker` / `removeMarker` and map controller via
+  // `_mapController` completer directly.
 
   void _subscribeDevicesRealtime() {
     final ref = _rtdbService.devicesRef;
@@ -432,6 +496,14 @@ class _SharedHomeState extends State<SharedHome> with TickerProviderStateMixin {
   void dispose() {
     _devicesSub?.cancel();
     _panelController.dispose();
+    // Dispose any active marker animation controllers
+    for (final c in _markerAnimControllers.values) {
+      try {
+        c.stop();
+        c.dispose();
+      } catch (_) {}
+    }
+    _markerAnimControllers.clear();
     super.dispose();
   }
 

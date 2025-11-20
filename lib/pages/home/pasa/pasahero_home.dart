@@ -4,11 +4,13 @@ import 'package:flutter/material.dart';
 import 'package:firebase_auth/firebase_auth.dart';
 import 'package:cloud_firestore/cloud_firestore.dart';
 import 'package:para2/pages/home/shared_home.dart';
+import 'package:para2/services/location_broadcast.dart';
 import 'package:para2/pages/login/login.dart';
 import 'package:para2/pages/login/qr_scan_page.dart';
 import 'package:google_maps_flutter/google_maps_flutter.dart';
 import 'package:geolocator/geolocator.dart';
 import 'dart:math' as math;
+import 'dart:io';
 import 'package:para2/theme/app_icons.dart';
 import 'package:para2/pages/settings/profile_settings.dart';
 import 'package:para2/services/RealtimeDatabaseService.dart';
@@ -24,7 +26,7 @@ class PasaheroHome extends StatefulWidget {
   State<PasaheroHome> createState() => _PasaheroHomeState();
 }
 
-class _PasaheroHomeState extends State<PasaheroHome> {
+class _PasaheroHomeState extends State<PasaheroHome> with WidgetsBindingObserver {
   final FirebaseAuth _auth = FirebaseAuth.instance;
   final RealtimeDatabaseService _rtdbService = RealtimeDatabaseService();
   final FirebaseFirestore _firestore = FirebaseFirestore.instance;
@@ -35,7 +37,7 @@ class _PasaheroHomeState extends State<PasaheroHome> {
 
   bool _hasSetDestination = false;
   bool _hasSelectedJeep = false;
-  bool _isFollowing = true;
+  // _isFollowing removed; follow handled by FollowService / SharedHome
   bool _showHint = true;
   bool _isLocationInitialized = false;
   bool _isProfileIncomplete = false;
@@ -51,15 +53,34 @@ class _PasaheroHomeState extends State<PasaheroHome> {
   @override
   void initState() {
     super.initState();
+    WidgetsBinding.instance.addObserver(this);
     _initUserLocation();
     _checkProfileCompletion();
   }
 
   @override
   void dispose() {
-    _positionStream?.cancel();
-    _rtdbStream?.cancel();
+    WidgetsBinding.instance.removeObserver(this);
+    _positionStream?.cancel().then((_) {
+      _positionStream = null;
+    });
+    _rtdbStream?.cancel().then((_) {
+      _rtdbStream = null;
+    });
     super.dispose();
+  }
+
+  @override
+  void didChangeAppLifecycleState(AppLifecycleState state) {
+    super.didChangeAppLifecycleState(state);
+    debugPrint('PasaheroHome lifecycle: $state');
+    if (state == AppLifecycleState.resumed) {
+      // Restart the position stream when app resumes
+      _startPositionStream();
+    } else if (state == AppLifecycleState.paused) {
+      // Pause subscription to conserve resources; will be restarted on resume
+      _positionStream?.pause();
+    }
   }
 
   Future<void> _checkProfileCompletion() async {
@@ -111,16 +132,51 @@ class _PasaheroHomeState extends State<PasaheroHome> {
         _isLocationInitialized = true;
       });
 
-      _positionStream = Geolocator.getPositionStream(
-        locationSettings: const LocationSettings(
-          accuracy: LocationAccuracy.high,
-          distanceFilter: 10,
-        ),
-      ).listen((p) {
-        _updateUserMarker(LatLng(p.latitude, p.longitude));
-      });
+      // Start a lifecycle-aware position stream
+      await _startPositionStream();
     } catch (e) {
       debugPrint("Error initializing GPS: $e");
+    }
+  }
+
+  /// Start position stream if not already started. This method guards
+  /// against double subscriptions and logs updates/errors for debugging.
+  Future<void> _startPositionStream() async {
+    try {
+      if (_positionStream != null) {
+        // If paused, resume
+        try {
+          _positionStream?.resume();
+        } catch (_) {}
+        debugPrint('Position stream already active or resumed');
+        return;
+      }
+
+      final settings = Platform.isAndroid
+          ? AndroidSettings(
+              accuracy: LocationAccuracy.best,
+              distanceFilter: 0,
+              intervalDuration: const Duration(milliseconds: 333),
+            )
+          : const LocationSettings(
+              accuracy: LocationAccuracy.best,
+              distanceFilter: 0,
+            );
+
+      _positionStream = Geolocator.getPositionStream(locationSettings: settings)
+          .listen((p) {
+        debugPrint('Position stream update: ${p.latitude}, ${p.longitude}');
+        _updateUserMarker(LatLng(p.latitude, p.longitude));
+      }, onError: (err) {
+        debugPrint('Position stream error: $err');
+      }, onDone: () {
+        debugPrint('Position stream done');
+        _positionStream = null;
+      });
+
+      debugPrint('Position stream started');
+    } catch (e) {
+      debugPrint('Failed to start position stream: $e');
     }
   }
 
@@ -135,13 +191,16 @@ class _PasaheroHomeState extends State<PasaheroHome> {
 
     setState(() => _userLoc = pos);
 
-    final shared = SharedHome.of(context);
-    if (shared != null && mounted) {
-      debugPrint("📍 Calling SharedHome.updateUserLocation()");
-      shared.updateUserLocation(pos);
-      shared.removeMarker(const MarkerId('user_marker'));
-    } else {
-      debugPrint("❌ SharedHome not available");
+    // Publish location to the app-wide broadcaster. SharedHome subscribes
+    // to this stream and will update the map marker regardless of ancestor
+    // lookup availability.
+    try {
+      final emitTs = DateTime.now().millisecondsSinceEpoch;
+      debugPrint('emit_ts=$emitTs Publishing location: $pos');
+      LocationBroadcast.instance.emit(pos);
+      debugPrint('📍 Published location to LocationBroadcast: $pos');
+    } catch (e) {
+      debugPrint('❌ Failed to publish location: $e');
     }
 
     _updatePolyline();
@@ -636,8 +695,10 @@ class _PasaheroHomeState extends State<PasaheroHome> {
   ];
 
   Future<void> _handleSignOut() async {
-    _positionStream?.cancel();
-    _rtdbStream?.cancel();
+    await _positionStream?.cancel();
+    _positionStream = null;
+    await _rtdbStream?.cancel();
+    _rtdbStream = null;
     await _auth.signOut();
     if (!mounted) return;
     Navigator.pushReplacement(
