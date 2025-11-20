@@ -4,6 +4,7 @@ import 'package:firebase_auth/firebase_auth.dart';
 import 'package:cloud_firestore/cloud_firestore.dart';
 import 'package:para2/services/ad_service.dart';
 import 'package:para2/services/auth_service.dart';
+import 'package:para2/services/snackbar_service.dart';
 
 class PointsRewardsWidget extends StatefulWidget {
   final VoidCallback? onPointsUpdate;
@@ -66,22 +67,12 @@ class _PointsRewardsWidgetState extends State<PointsRewardsWidget> {
         widget.onPointsUpdate?.call();
 
         if (mounted) {
-          ScaffoldMessenger.of(context).showSnackBar(
-            SnackBar(
-              content: Text('🎉 You earned ${AdService.pointsPerAd} points!'),
-              backgroundColor: Colors.green,
-            ),
-          );
+          SnackbarService.show(context, '🎉 You earned ${AdService.pointsPerAd} points!');
         }
       }
     } catch (e) {
       if (mounted) {
-        ScaffoldMessenger.of(context).showSnackBar(
-          SnackBar(
-            content: Text('❌ Failed to earn points: $e'),
-            backgroundColor: Colors.red,
-          ),
-        );
+        SnackbarService.show(context, '❌ Failed to earn points: $e');
       }
     } finally {
       if (mounted) {
@@ -179,18 +170,13 @@ class _PointsRewardsWidgetState extends State<PointsRewardsWidget> {
             onPressed: () => Navigator.pop(context),
             child: const Text('Cancel'),
           ),
-          ElevatedButton(
-            onPressed: () {
-              Navigator.pop(context);
-              ScaffoldMessenger.of(context).showSnackBar(
-                const SnackBar(
-                  content: Text('Discount will be applied to your next ride!'),
-                  backgroundColor: Colors.green,
-                ),
-              );
-            },
-            child: const Text('Redeem'),
-          ),
+              ElevatedButton(
+              onPressed: () {
+                Navigator.pop(context);
+                SnackbarService.show(context, 'Discount will be applied to your next ride!');
+              },
+              child: const Text('Redeem'),
+            ),
         ],
       ),
     );

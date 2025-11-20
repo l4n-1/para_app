@@ -1,6 +1,7 @@
 import 'package:flutter/material.dart';
 import 'package:para2/pages/login/qr_scan_page.dart';
 import 'package:para2/pages/login/signup_step2.dart';
+import 'package:para2/services/snackbar_service.dart';
 
 class SignupPage extends StatefulWidget {
   const SignupPage({super.key});
@@ -38,9 +39,7 @@ class _SignupPageState extends State<SignupPage> {
         _lastNameController.text.isEmpty ||
         _userNameController.text.isEmpty ||
         _selectedDOB == null) {
-      ScaffoldMessenger.of(context).showSnackBar(
-        const SnackBar(content: Text('Please complete all required fields')),
-      );
+      SnackbarService.show(context, 'Please complete all required fields');
       return;
     }
 

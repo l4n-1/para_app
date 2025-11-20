@@ -1,6 +1,7 @@
 // lib/pages/login/tsuperhero_signup_page.dart
 import 'package:flutter/material.dart';
 import 'package:para2/pages/login/signup_step2.dart';
+import 'package:para2/services/snackbar_service.dart';
 
 class TsuperheroSignupPage extends StatefulWidget {
   final String scannedId;
@@ -32,9 +33,7 @@ class _TsuperheroSignupPageState extends State<TsuperheroSignupPage> {
         _lastNameController.text.isEmpty ||
         _userNameController.text.isEmpty ||
         _selectedDOB == null) {
-      ScaffoldMessenger.of(context).showSnackBar(
-        const SnackBar(content: Text('Please complete all required fields')),
-      );
+      SnackbarService.show(context, 'Please complete all required fields');
       return;
     }
 

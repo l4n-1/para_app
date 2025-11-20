@@ -7,6 +7,7 @@ import 'package:http/http.dart' as http;
 import 'package:image_picker/image_picker.dart';
 import 'package:para2/pages/home/role_router.dart';
 import 'package:para2/pages/login/tsuperhero_signup_page.dart';
+import 'package:para2/services/snackbar_service.dart';
 
 class QRScanPage extends StatefulWidget {
   const QRScanPage({super.key});
@@ -73,13 +74,7 @@ class _QRScanPageState extends State<QRScanPage> {
           'boxClaimed': deviceId,
         }, SetOptions(merge: true));
 
-        ScaffoldMessenger.of(context).showSnackBar(
-          SnackBar(
-            content: Text(
-              result['message'] ?? 'Claimed $deviceId successfully!',
-            ),
-          ),
-        );
+        SnackbarService.show(context, result['message'] ?? 'Claimed $deviceId successfully!');
 
         // ✅ Redirect to dashboard
         Navigator.pushReplacement(
@@ -87,17 +82,11 @@ class _QRScanPageState extends State<QRScanPage> {
           MaterialPageRoute(builder: (_) => const RoleRouter()),
         );
       } else {
-        ScaffoldMessenger.of(context).showSnackBar(
-          SnackBar(
-            content: Text('❌ Failed: ${result['message'] ?? 'Unknown error'}'),
-          ),
-        );
+        SnackbarService.show(context, '❌ Failed: ${result['message'] ?? 'Unknown error'}');
       }
     } catch (e) {
       debugPrint("⚠️ Error: $e");
-      ScaffoldMessenger.of(
-        context,
-      ).showSnackBar(SnackBar(content: Text('Error: $e')));
+      SnackbarService.show(context, 'Error: $e');
     } finally {
       setState(() => _isProcessing = false);
     }
@@ -116,30 +105,19 @@ class _QRScanPageState extends State<QRScanPage> {
         setState(() => _isProcessing = true);
 
         // Show processing message
-        ScaffoldMessenger.of(context).showSnackBar(
-          const SnackBar(
-            content: Text('🔍 Scanning image for QR code...'),
-            duration: Duration(seconds: 2),
-          ),
-        );
+        SnackbarService.show(context, '🔍 Scanning image for QR code...', duration: const Duration(seconds: 2));
 
         // Simulate QR code processing (in real app, use QR decoding library)
         await Future.delayed(const Duration(seconds: 2));
 
         // For demo purposes - show instruction
-        ScaffoldMessenger.of(context).showSnackBar(
-          const SnackBar(
-            content: Text('📸 In production: QR would be decoded from gallery image'),
-          ),
-        );
+        SnackbarService.show(context, '📸 In production: QR would be decoded from gallery image');
 
         // Demo: Simulate finding a QR code
         _showGalleryQRDemo();
       }
     } catch (e) {
-      ScaffoldMessenger.of(context).showSnackBar(
-        SnackBar(content: Text('❌ Error picking image: $e')),
-      );
+      SnackbarService.show(context, '❌ Error picking image: $e');
     } finally {
       setState(() => _isProcessing = false);
     }

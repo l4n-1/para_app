@@ -2,6 +2,9 @@ import 'package:flutter/material.dart';
 import 'package:google_maps_flutter/google_maps_flutter.dart';
 import 'map_theme_service.dart';
 import 'map_controller_service.dart';
+import 'follow_service.dart';
+import 'package:para2/services/location_service.dart';
+import 'package:para2/services/snackbar_service.dart';
 
 class ButtonActions {
   // Recenter button action
@@ -10,10 +13,10 @@ class ButtonActions {
       GoogleMapController? controller,
       LatLng? userLocation,
       ) async {
+    // If no controller passed, try the global controller
+    controller ??= MapControllerService.instance.current;
     if (controller == null || userLocation == null) {
-      ScaffoldMessenger.of(context).showSnackBar(
-        const SnackBar(content: Text('Location not available')),
-      );
+      SnackbarService.show(context, 'Location not available');
       return;
     }
 
@@ -22,57 +25,16 @@ class ButtonActions {
         CameraUpdate.newLatLngZoom(userLocation, 16.0),
       );
 
-      ScaffoldMessenger.of(context).showSnackBar(
-        const SnackBar(
-          content: Text('📍 Centered to your location'),
-          duration: Duration(seconds: 2),
-        ),
-      );
+      SnackbarService.show(context, 'Centered to your location', duration: const Duration(seconds: 2));
     } catch (e) {
-      ScaffoldMessenger.of(context).showSnackBar(
-        SnackBar(content: Text('Error: $e')),
-      );
+      SnackbarService.show(context, 'Error: $e');
     }
   }
 
   // Trophy button action
-  static void showTrophyDialog(BuildContext context) {
-    showDialog(
-      context: context,
-      builder: (context) => AlertDialog(
-        title: const Text('🏆 Achievements'),
-        content: const Column(
-          mainAxisSize: MainAxisSize.min,
-          children: [
-            Text('Your achievements will appear here!'),
-            SizedBox(height: 16),
-            ListTile(
-              leading: Icon(Icons.emoji_events, color: Colors.amber),
-              title: Text('First Ride'),
-              subtitle: Text('Complete your first jeepney ride'),
-            ),
-            ListTile(
-              leading: Icon(Icons.people, color: Colors.blue),
-              title: Text('Regular Commuter'),
-              subtitle: Text('Take 10 rides'),
-            ),
-          ],
-        ),
-        actions: [
-          TextButton(
-            onPressed: () => Navigator.pop(context),
-            child: const Text('Close'),
-          ),
-        ],
-      ),
-    );
-  }
+  // (Achievements UI removed — feature replaced by other UX)
 
-  // Compass button action
-  static void toggleCompassMode() {
-    // Add compass functionality here
-    print('Compass mode toggled');
-  }
+  // (Compass functionality removed)
 
   /// Toggle the Google Map theme between light and dark. If a controller is
   /// provided the style will be applied immediately.
@@ -84,28 +46,36 @@ class ButtonActions {
     final ctrl = controller ?? MapControllerService.instance.current;
     await MapThemeService.instance.toggle(ctrl);
     final enabled = MapThemeService.instance.isDarkMode.value;
-    ScaffoldMessenger.of(context).showSnackBar(
-      SnackBar(
-        content: Text(enabled ? 'Map: Dark mode' : 'Map: Light mode'),
-        duration: const Duration(seconds: 1),
-      ),
-    );
+    SnackbarService.show(context, enabled ? 'Map: Dark mode' : 'Map: Light mode', duration: const Duration(seconds: 1));
   }
 
-  // Route planning button
-  static void showRoutePlanner(BuildContext context) {
-    showDialog(
-      context: context,
-      builder: (context) => AlertDialog(
-        title: const Text('🚍 Plan Route'),
-        content: const Text('Route planning feature coming soon!'),
-        actions: [
-          TextButton(
-            onPressed: () => Navigator.pop(context),
-            child: const Text('OK'),
-          ),
-        ],
-      ),
-    );
+  /// Toggle follow-on-move mode. When enabled the map will follow the user's
+  /// live location updates; when disabled the camera is free-roam.
+  static Future<void> toggleFollowMode(BuildContext context) async {
+    final enabled = FollowService.instance.toggle();
+    SnackbarService.show(context, enabled ? 'Following enabled' : 'Following disabled', duration: const Duration(seconds: 1));
+
+    // If follow mode was just enabled, immediately center the map to the
+    // current (or last-known) user location so the user sees that follow is active.
+    if (enabled) {
+      try {
+        final ctrl = MapControllerService.instance.current;
+        if (ctrl == null) return;
+
+        // Prefer a fresh current location; fall back to last-known location.
+        LatLng? loc = await LocationService.getCurrentLocation();
+        loc ??= await LocationService.getLastKnownLocation();
+
+        if (loc != null) {
+          await ctrl.animateCamera(
+            CameraUpdate.newLatLngZoom(loc, 16.0),
+          );
+        }
+      } catch (e) {
+        debugPrint('Error recentering when enabling follow: $e');
+      }
+    }
   }
+
+  // (Route planner removed)
 }

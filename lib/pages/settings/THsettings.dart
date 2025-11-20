@@ -5,6 +5,7 @@ import 'package:firebase_auth/firebase_auth.dart';
 import 'package:cloud_firestore/cloud_firestore.dart';
 import 'package:firebase_database/firebase_database.dart';
 import 'package:para2/services/RealtimeDatabaseService.dart';
+import 'package:para2/services/snackbar_service.dart';
 
 class THsettings extends StatefulWidget {
   const THsettings({super.key});
@@ -93,20 +94,14 @@ class _THsettingsState extends State<THsettings> {
         _maxCapacity = newCapacity;
       });
 
-      ScaffoldMessenger.of(context).showSnackBar(
-        const SnackBar(content: Text('✅ Maximum capacity updated')),
-      );
+      SnackbarService.show(context, '✅ Maximum capacity updated');
     } catch (e) {
-      ScaffoldMessenger.of(context).showSnackBar(
-        SnackBar(content: Text('❌ Failed to update capacity: $e')),
-      );
+      SnackbarService.show(context, '❌ Failed to update capacity: $e');
     }
   }
 
   void _showComingSoon(String feature) {
-    ScaffoldMessenger.of(context).showSnackBar(
-      SnackBar(content: Text('$feature - Coming Soon!')),
-    );
+    SnackbarService.show(context, '$feature - Coming Soon!');
   }
 
   void _showCapacityDialog() {

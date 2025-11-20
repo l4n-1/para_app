@@ -13,6 +13,7 @@ import 'package:para2/theme/app_icons.dart';
 import 'package:para2/pages/settings/profile_settings.dart';
 import 'package:para2/services/RealtimeDatabaseService.dart';
 import 'package:para2/services/button_actions.dart';
+import 'package:para2/services/snackbar_service.dart';
 import 'package:para2/widgets/compact_ads_button.dart';
 import 'package:para2/pages/biyahe/biyahe_logs_page.dart';
 
@@ -87,9 +88,7 @@ class _PasaheroHomeState extends State<PasaheroHome> {
     try {
       bool serviceEnabled = await Geolocator.isLocationServiceEnabled();
       if (!serviceEnabled) {
-        ScaffoldMessenger.of(context).showSnackBar(
-          const SnackBar(content: Text("⚠️ Please enable GPS service.")),
-        );
+        SnackbarService.show(context, '⚠️ Please enable GPS service.');
         return;
       }
 
@@ -99,9 +98,7 @@ class _PasaheroHomeState extends State<PasaheroHome> {
       }
       if (permission == LocationPermission.denied ||
           permission == LocationPermission.deniedForever) {
-        ScaffoldMessenger.of(context).showSnackBar(
-          const SnackBar(content: Text("❌ Location permission denied.")),
-        );
+        SnackbarService.show(context, '❌ Location permission denied.');
         return;
       }
 
@@ -134,7 +131,7 @@ class _PasaheroHomeState extends State<PasaheroHome> {
       return;
     }
 
-    debugPrint("📍 Pasahero Location Update: ${pos.latitude}, ${pos.longitude}");
+    debugPrint("Pasahero Location Update: ${pos.latitude}, ${pos.longitude}");
 
     setState(() => _userLoc = pos);
 
@@ -337,65 +334,35 @@ class _PasaheroHomeState extends State<PasaheroHome> {
   Future<void> _sendParaSignal() async {
     // Check profile completion first
     if (_isProfileIncomplete) {
-      ScaffoldMessenger.of(context).showSnackBar(
-        const SnackBar(
-          content: Text('❌ Please complete your profile in Settings to use PARA!'),
-          backgroundColor: Colors.orange,
-        ),
-      );
+      SnackbarService.show(context, '❌ Please complete your profile in Settings to use PARA!');
       return;
     }
 
     if (_selectedJeepId == null || _userLoc == null) {
-      ScaffoldMessenger.of(context).showSnackBar(
-        const SnackBar(
-          content: Text('❌ Please select a jeepney first'),
-          backgroundColor: Colors.red,
-        ),
-      );
+      SnackbarService.show(context, '❌ Please select a jeepney first');
       return;
     }
 
     if (_destination == null) {
-      ScaffoldMessenger.of(context).showSnackBar(
-        const SnackBar(
-          content: Text('❌ Please set your destination first'),
-          backgroundColor: Colors.red,
-        ),
-      );
+      SnackbarService.show(context, '❌ Please set your destination first');
       return;
     }
 
     final selectedJeep = _jeepneys[_selectedJeepId];
     if (selectedJeep == null || selectedJeep['isOnline'] != true) {
-      ScaffoldMessenger.of(context).showSnackBar(
-        const SnackBar(
-          content: Text('❌ Selected jeepney is no longer available'),
-          backgroundColor: Colors.red,
-        ),
-      );
+      SnackbarService.show(context, '❌ Selected jeepney is no longer available');
       return;
     }
 
     // Check capacity
     if (selectedJeep['hasAvailableSeats'] != true) {
-      ScaffoldMessenger.of(context).showSnackBar(
-        SnackBar(
-          content: Text('❌ Jeepney is full (${selectedJeep['currentPassengers']}/${selectedJeep['maxCapacity']})'),
-          backgroundColor: Colors.red,
-        ),
-      );
+      SnackbarService.show(context, '❌ Jeepney is full (${selectedJeep['currentPassengers']}/${selectedJeep['maxCapacity']})');
       return;
     }
 
     // Check route matching
     if (!_isJeepneyOnRoute(_selectedJeepId!)) {
-      ScaffoldMessenger.of(context).showSnackBar(
-        const SnackBar(
-          content: Text('❌ Selected jeepney is not on your route'),
-          backgroundColor: Colors.orange,
-        ),
-      );
+      SnackbarService.show(context, '❌ Selected jeepney is not on your route');
       return;
     }
 
@@ -420,13 +387,7 @@ class _PasaheroHomeState extends State<PasaheroHome> {
         'isDigitalPayment': isDigitalPayment,
       });
 
-      ScaffoldMessenger.of(context).showSnackBar(
-        SnackBar(
-          content: Text('🚍 PARA! signal sent to Jeepney $_selectedJeepId'),
-          backgroundColor: Colors.green,
-          duration: const Duration(seconds: 3),
-        ),
-      );
+      SnackbarService.show(context, '🚍 PARA! signal sent to Jeepney $_selectedJeepId', duration: const Duration(seconds: 3));
 
       debugPrint("✅ PARA! request sent with ID: ${docRef.id}");
 
@@ -440,13 +401,7 @@ class _PasaheroHomeState extends State<PasaheroHome> {
 
     } catch (e) {
       debugPrint("❌ Failed to send PARA! signal: $e");
-      ScaffoldMessenger.of(context).showSnackBar(
-        SnackBar(
-          content: Text('❌ Failed to send PARA! signal: $e'),
-          backgroundColor: Colors.red,
-          duration: const Duration(seconds: 3),
-        ),
-      );
+      SnackbarService.show(context, '❌ Failed to send PARA! signal: $e', duration: const Duration(seconds: 3));
     }
   }
 
@@ -528,12 +483,7 @@ class _PasaheroHomeState extends State<PasaheroHome> {
                   _updatePolyline();
                 });
 
-                ScaffoldMessenger.of(context).showSnackBar(
-                  SnackBar(
-                    content: Text('✅ Selected Jeepney $id ($availableSeats seats available)'),
-                    duration: const Duration(seconds: 1),
-                  ),
-                );
+                SnackbarService.show(context, '✅ Selected Jeepney $id ($availableSeats seats available)', duration: const Duration(seconds: 1));
               },
             );
           }),
@@ -612,7 +562,7 @@ class _PasaheroHomeState extends State<PasaheroHome> {
     Container(
       margin: EdgeInsets.only(top: 15,right: 15,bottom: 8),
       decoration: BoxDecoration(
-      color: const Color.fromARGB(255, 40, 36, 41),
+      color: const Color.fromARGB(255, 23, 22, 27),
       borderRadius: BorderRadius.only(topRight: Radius.circular(17),bottomRight: Radius.circular(17)),
       ),
       child: Column (

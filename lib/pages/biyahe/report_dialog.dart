@@ -3,6 +3,7 @@ import 'package:flutter/material.dart';
 import 'package:firebase_auth/firebase_auth.dart';
 import 'package:image_picker/image_picker.dart';
 import 'package:para2/services/qr_boarding_service.dart';
+import 'package:para2/services/snackbar_service.dart';
 
 class ReportDialog extends StatefulWidget {
   final Map<String, dynamic> logData;
@@ -160,18 +161,14 @@ class _ReportDialogState extends State<ReportDialog> {
         _evidenceUrls.add(pickedFile.path);
       });
 
-      ScaffoldMessenger.of(context).showSnackBar(
-        const SnackBar(content: Text('Photo added as evidence')),
-      );
+      SnackbarService.show(context, 'Photo added as evidence');
     }
   }
 
   Future<void> _submitReport() async {
     final user = _auth.currentUser;
     if (user == null || _descriptionController.text.trim().isEmpty) {
-      ScaffoldMessenger.of(context).showSnackBar(
-        const SnackBar(content: Text('Please provide a description')),
-      );
+      SnackbarService.show(context, 'Please provide a description');
       return;
     }
 
@@ -192,28 +189,13 @@ class _ReportDialogState extends State<ReportDialog> {
       );
 
       if (result['success'] == true) {
-        ScaffoldMessenger.of(context).showSnackBar(
-          SnackBar(
-            content: Text(result['message']),
-            backgroundColor: Colors.green,
-          ),
-        );
+        SnackbarService.show(context, result['message']);
         Navigator.pop(context);
       } else {
-        ScaffoldMessenger.of(context).showSnackBar(
-          SnackBar(
-            content: Text(result['message']),
-            backgroundColor: Colors.red,
-          ),
-        );
+        SnackbarService.show(context, result['message']);
       }
     } catch (e) {
-      ScaffoldMessenger.of(context).showSnackBar(
-        SnackBar(
-          content: Text('Error submitting report: $e'),
-          backgroundColor: Colors.red,
-        ),
-      );
+      SnackbarService.show(context, 'Error submitting report: $e');
     } finally {
       setState(() => _isSubmitting = false);
     }

@@ -11,6 +11,7 @@ import 'package:para2/services/RealtimeDatabaseService.dart';
 import 'package:para2/theme/app_icons.dart';
 import 'package:para2/pages/settings/profile_settings.dart';
 import 'package:para2/pages/biyahe/biyahe_logs_page.dart';
+import 'package:para2/services/snackbar_service.dart';
 
 class TsuperheroHome extends StatefulWidget {
   const TsuperheroHome({super.key});
@@ -325,14 +326,7 @@ class _TsuperheroHomeState extends State<TsuperheroHome> {
         }
       }
 
-      ScaffoldMessenger.of(context).showSnackBar(
-        SnackBar(
-          content: Text(
-            _isOnline ? '🟢 You are now ONLINE - Visible to passengers' : '🔴 You are now OFFLINE',
-          ),
-          duration: const Duration(seconds: 2),
-        ),
-      );
+      SnackbarService.show(context, _isOnline ? '🟢 You are now ONLINE - Visible to passengers' : '🔴 You are now OFFLINE', duration: const Duration(seconds: 2));
     } catch (e) {
       debugPrint('Error updating online status: $e');
     }
@@ -569,9 +563,7 @@ class _TsuperheroHomeState extends State<TsuperheroHome> {
         title: const Text('Passenger Management'),
         subtitle: Text('Current: $_currentPassengers/$_maxCapacity'),
         onTap: () {
-          ScaffoldMessenger.of(context).showSnackBar(
-            const SnackBar(content: Text('Use the passenger counter on main screen')),
-          );
+          SnackbarService.show(context, 'Use the passenger counter on main screen');
         },
       ),
       ListTile(

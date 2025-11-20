@@ -94,11 +94,12 @@ class MyApp extends StatelessWidget {
       theme: ThemeData(
         useMaterial3: true,
         colorSchemeSeed: Colors.blue,
+        fontFamily: GoogleFonts.inter().fontFamily,
         listTileTheme: ListTileThemeData(
           titleTextStyle: GoogleFonts.inter(
             fontSize: 15,
             color: Colors.white),
-          iconColor:  const Color.fromARGB(255, 171, 236, 66),
+          iconColor:  const Color.fromARGB(255, 124, 155, 53),
         ),
         // ✅ ADDED: Better input field styling
         inputDecorationTheme: InputDecorationTheme(

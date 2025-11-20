@@ -1,6 +1,7 @@
 import 'package:flutter/material.dart';
 import 'package:firebase_auth/firebase_auth.dart';
 import 'package:cloud_firestore/cloud_firestore.dart';
+import 'package:para2/services/snackbar_service.dart';
 
 class ProfileSettingsPage extends StatefulWidget {
   const ProfileSettingsPage({super.key});
@@ -54,9 +55,7 @@ class _ProfileSettingsPageState extends State<ProfileSettingsPage> {
       }
     } catch (e) {
       if (mounted) {
-        ScaffoldMessenger.of(context).showSnackBar(
-          SnackBar(content: Text('⚠️ Error loading profile: $e')),
-        );
+        SnackbarService.show(context, '⚠️ Error loading profile: $e');
       }
     } finally {
       if (mounted) setState(() => _isLoading = false);
@@ -70,9 +69,7 @@ class _ProfileSettingsPageState extends State<ProfileSettingsPage> {
     if (_usernameController.text.trim().isEmpty ||
         _contactController.text.trim().isEmpty ||
         _dob == null) {
-      ScaffoldMessenger.of(context).showSnackBar(
-        const SnackBar(content: Text('Please fill in all fields')),
-      );
+      SnackbarService.show(context, 'Please fill in all fields');
       return;
     }
 
@@ -93,9 +90,7 @@ class _ProfileSettingsPageState extends State<ProfileSettingsPage> {
       });
 
       if (mounted) {
-        ScaffoldMessenger.of(context).showSnackBar(
-          const SnackBar(content: Text('✅ Profile updated successfully')),
-        );
+        SnackbarService.show(context, '✅ Profile updated successfully');
 
         // ✅ ADDED: Navigate back after successful save
         Future.delayed(const Duration(milliseconds: 1500), () {
@@ -106,9 +101,7 @@ class _ProfileSettingsPageState extends State<ProfileSettingsPage> {
       }
     } catch (e) {
       if (mounted) {
-        ScaffoldMessenger.of(context).showSnackBar(
-          SnackBar(content: Text('❌ Failed to save: $e')),
-        );
+        SnackbarService.show(context, '❌ Failed to save: $e');
       }
     } finally {
       if (mounted) setState(() => _isSaving = false);

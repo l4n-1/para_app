@@ -1,6 +1,7 @@
 // lib/pages/settings/PHsettings.dart
 import 'package:flutter/material.dart';
 import 'package:shared_preferences/shared_preferences.dart';
+import 'package:para2/services/snackbar_service.dart';
 
 class PHsettings extends StatefulWidget {
   const PHsettings({super.key});
@@ -37,9 +38,7 @@ class _PHsettingsState extends State<PHsettings> {
   }
 
   void _showComingSoon(String feature) {
-    ScaffoldMessenger.of(context).showSnackBar(
-      SnackBar(content: Text('$feature - Coming Soon!')),
-    );
+    SnackbarService.show(context, '$feature - Coming Soon!');
   }
 
   @override

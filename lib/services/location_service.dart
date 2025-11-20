@@ -34,6 +34,19 @@ class LocationService {
     }
   }
 
+  /// Try to return the last known location without prompting for permissions.
+  /// Falls back to null if not available.
+  static Future<LatLng?> getLastKnownLocation() async {
+    try {
+      final Position? pos = await Geolocator.getLastKnownPosition();
+      if (pos == null) return null;
+      return LatLng(pos.latitude, pos.longitude);
+    } catch (e) {
+      // ignore errors and return null
+      return null;
+    }
+  }
+
   static Future<void> centerToLocation(GoogleMapController controller, LatLng location) async {
     try {
       await controller.animateCamera(

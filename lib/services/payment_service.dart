@@ -8,6 +8,7 @@ import 'package:para2/services/RealtimeDatabaseService.dart';
 import 'package:para2/pages/settings/profile_settings.dart';
 import 'dart:math' as math;
 import 'package:para2/theme/app_icons.dart';
+import 'package:para2/services/snackbar_service.dart';
 
 class SharedHome extends StatefulWidget {
   final String roleLabel;
@@ -356,12 +357,7 @@ class _SharedHomeState extends State<SharedHome> with TickerProviderStateMixin {
 
       // Check if we have a current location
       if (_currentUserLoc == null) {
-        ScaffoldMessenger.of(context).showSnackBar(
-          const SnackBar(
-            content: Text('📍 Waiting for your location...'),
-            duration: Duration(seconds: 2),
-          ),
-        );
+        SnackbarService.show(context, '📍 Waiting for your location...', duration: const Duration(seconds: 2));
         return;
       }
 
@@ -370,21 +366,11 @@ class _SharedHomeState extends State<SharedHome> with TickerProviderStateMixin {
         CameraUpdate.newLatLngZoom(_currentUserLoc!, 16.0),
       );
 
-      ScaffoldMessenger.of(context).showSnackBar(
-        const SnackBar(
-          content: Text('📍 Centered on your location'),
-          duration: Duration(seconds: 1),
-        ),
-      );
+      SnackbarService.show(context, '📍 Centered on your location', duration: const Duration(seconds: 1));
 
     } catch (e) {
       debugPrint("❌ Recenter error: $e");
-      ScaffoldMessenger.of(context).showSnackBar(
-        SnackBar(
-          content: Text('❌ Failed to center: $e'),
-          duration: const Duration(seconds: 2),
-        ),
-      );
+      SnackbarService.show(context, '❌ Failed to center: $e', duration: const Duration(seconds: 2));
     }
   }
 

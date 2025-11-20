@@ -3,6 +3,7 @@ import 'package:flutter/material.dart';
 import 'package:firebase_auth/firebase_auth.dart';
 import 'package:cloud_firestore/cloud_firestore.dart';
 import 'package:para2/services/auth_service.dart';
+import 'package:para2/services/snackbar_service.dart';
 
 class CompactAdsButton extends StatefulWidget {
   final VoidCallback? onPointsUpdate;
@@ -59,22 +60,12 @@ class _CompactAdsButtonState extends State<CompactAdsButton> {
 
       widget.onPointsUpdate?.call();
 
-      if (mounted) {
-        ScaffoldMessenger.of(context).showSnackBar(
-          const SnackBar(
-            content: Text('🎉 +10 Para! Coins earned!'),
-            backgroundColor: Colors.green,
-          ),
-        );
+        if (mounted) {
+        SnackbarService.show(context, '🎉 +10 Para! Coins earned!');
       }
     } catch (e) {
       if (mounted) {
-        ScaffoldMessenger.of(context).showSnackBar(
-          SnackBar(
-            content: Text('❌ Failed to earn coins: $e'),
-            backgroundColor: Colors.red,
-          ),
-        );
+        SnackbarService.show(context, '❌ Failed to earn coins: $e');
       }
     } finally {
       if (mounted) {

@@ -1,6 +1,7 @@
 // lib/widgets/enhanced_para_button.dart
 import 'package:flutter/material.dart';
 import 'dart:async';
+import 'package:para2/services/snackbar_service.dart';
 
 class EnhancedParaButton extends StatefulWidget {
   final VoidCallback onParaPressed;
@@ -84,13 +85,7 @@ class _EnhancedParaButtonState extends State<EnhancedParaButton> {
     widget.onParaPressed();
 
     // Show success message
-    ScaffoldMessenger.of(context).showSnackBar(
-      SnackBar(
-        content: Text('🚍 PARA! signal sent! (${_pressCount}/$maxPresses used)'),
-        backgroundColor: Colors.green,
-        duration: const Duration(seconds: 2),
-      ),
-    );
+    SnackbarService.show(context, '🚍 PARA! signal sent! (${_pressCount}/$maxPresses used)', duration: const Duration(seconds: 2));
 
     // Reset press count after cooldown
     Future.delayed(const Duration(seconds: cooldownDuration), () {
@@ -103,22 +98,12 @@ class _EnhancedParaButtonState extends State<EnhancedParaButton> {
   }
 
   void _showMaxPressesWarning() {
-    ScaffoldMessenger.of(context).showSnackBar(
-      const SnackBar(
-        content: Text('❌ Maximum PARA! presses reached. Wait for cooldown.'),
-        backgroundColor: Colors.orange,
-      ),
-    );
+    SnackbarService.show(context, '❌ Maximum PARA! presses reached. Wait for cooldown.');
   }
 
   void _showCooldownWarning(DateTime cooldownEnd) {
     final remaining = cooldownEnd.difference(DateTime.now()).inSeconds;
-    ScaffoldMessenger.of(context).showSnackBar(
-      SnackBar(
-        content: Text('⏳ Cooldown: ${remaining}s remaining'),
-        backgroundColor: Colors.blue,
-      ),
-    );
+    SnackbarService.show(context, '⏳ Cooldown: ${remaining}s remaining');
   }
 
   @override

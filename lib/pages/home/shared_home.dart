@@ -13,6 +13,9 @@ import 'package:para2/pages/settings/PHdashboard.dart';
 import 'package:provider/provider.dart';
 // map theme applied via MapControllerService when controller is set
 import 'package:para2/services/map_controller_service.dart';
+import 'package:para2/services/button_actions.dart';
+import 'package:para2/services/follow_service.dart';
+import 'package:para2/services/snackbar_service.dart';
 
 class SharedHome extends StatefulWidget {
   final String roleLabel;
@@ -54,8 +57,8 @@ class _SharedHomeState extends State<SharedHome> with TickerProviderStateMixin {
   StreamSubscription? _devicesSub;
 
   bool _isMapReady = false;
-  LatLng? _currentUserLoc;
   bool _hasCenteredOnUser = false;
+  LatLng? _currentUserLoc;
   bool _isFirstLocation = true;
 
   bool _isPanelOpen = false;
@@ -72,10 +75,14 @@ class _SharedHomeState extends State<SharedHome> with TickerProviderStateMixin {
   // User coins
   double _userCoins = 0.0;
 
-  static const CameraPosition _initialCamera = CameraPosition(
+  // default initial camera (used until we resolve a last-known location)
+  CameraPosition _initialCamera = const CameraPosition(
     target: LatLng(14.8528, 120.8180),
     zoom: 14,
   );
+
+  /// Whether we've already centered the camera to the user's live location
+  /// after it became available. Used to avoid recentering on every update.
 
   @override
   void initState() {
@@ -90,6 +97,8 @@ class _SharedHomeState extends State<SharedHome> with TickerProviderStateMixin {
         );
 
     _loadCustomMarkers();
+    // Try to set an initial camera from a cached "last known" location
+    _applyLastKnownLocationToInitialCamera();
     _subscribeDevicesRealtime();
     _checkProfileCompletion();
     _loadUserDisplayName();
@@ -99,6 +108,20 @@ class _SharedHomeState extends State<SharedHome> with TickerProviderStateMixin {
     WidgetsBinding.instance.addPostFrameCallback((_) {
       _getCurrentLocation();
     });
+  }
+
+  Future<void> _applyLastKnownLocationToInitialCamera() async {
+    try {
+      final last = await LocationService.getLastKnownLocation();
+      if (last != null) {
+        setState(() {
+          _initialCamera = CameraPosition(target: last, zoom: 14);
+        });
+        debugPrint('Using last known location for initial camera: $last');
+      }
+    } catch (e) {
+      debugPrint('Error getting last known location: $e');
+    }
   }
 
   Future<void> _loadCustomMarkers() async {
@@ -257,7 +280,7 @@ class _SharedHomeState extends State<SharedHome> with TickerProviderStateMixin {
   Future<GoogleMapController> getMapController() async => _mapController.future;
 
   // ✅ FIXED: Enhanced location update with custom user marker
-  void updateUserLocation(LatLng userLoc) {
+  Future<void> updateUserLocation(LatLng userLoc) async {
     if (userLoc.latitude == 0.0 && userLoc.longitude == 0.0) {
       debugPrint("⚠️ Invalid location (0,0) - skipping");
       return;
@@ -280,6 +303,37 @@ class _SharedHomeState extends State<SharedHome> with TickerProviderStateMixin {
     );
 
     addOrUpdateMarker(const MarkerId('user_marker'), userMarker);
+
+    // If follow mode is enabled, animate the camera to the user's position
+    // on each live update. Otherwise, only center once if we haven't yet
+    // (preserving previous behavior but respecting follow toggle).
+    final follow = FollowService.instance.isFollowing.value;
+    if (follow) {
+      if (_isMapReady) {
+        try {
+          final ctrl = await _mapController.future;
+          await ctrl.animateCamera(CameraUpdate.newLatLngZoom(userLoc, 16.0));
+        } catch (e) {
+          debugPrint('Error centering to user location while following: $e');
+        }
+      }
+    } else {
+      if (_isMapReady && !_hasCenteredOnUser) {
+        try {
+          final ctrl = await _mapController.future;
+          await ctrl.animateCamera(CameraUpdate.newLatLngZoom(userLoc, 16.0));
+          _hasCenteredOnUser = true;
+        } catch (e) {
+          debugPrint('Error centering to user location: $e');
+        }
+      }
+    }
+  }
+
+  // Helper to get the map controller future safely
+  Future<GoogleMapController> _map_controller_future_or_completer() async {
+    if (_mapController.isCompleted) return _mapController.future;
+    return await _mapController.future;
   }
 
   // ✅ FIX: Remove the giant red pin by clearing the user marker
@@ -417,23 +471,17 @@ class _SharedHomeState extends State<SharedHome> with TickerProviderStateMixin {
       final GoogleMapController controller = await _mapController.future;
 
       // If no location, try to get it first
-      if (_currentUserLoc == null) {
-        ScaffoldMessenger.of(context).showSnackBar(
-          const SnackBar(
-            content: Text('🔄 Getting your location...'),
-            duration: Duration(seconds: 2),
-          ),
-        );
+        if (_currentUserLoc == null) {
+        SnackbarService.show(context, 'Getting your location...', duration: const Duration(seconds: 2));
+        
+        
+        
+        
         await _getCurrentLocation();
 
         // Check again after trying to get location
         if (_currentUserLoc == null) {
-          ScaffoldMessenger.of(context).showSnackBar(
-            const SnackBar(
-              content: Text('❌ Cannot get location. Check permissions and try again.'),
-              duration: Duration(seconds: 3),
-            ),
-          );
+          SnackbarService.show(context, 'Cannot get location. Check permissions and try again.', duration: const Duration(seconds: 3));
           return;
         }
       }
@@ -444,21 +492,11 @@ class _SharedHomeState extends State<SharedHome> with TickerProviderStateMixin {
         CameraUpdate.newLatLngZoom(_currentUserLoc!, 16.0),
       );
 
-      ScaffoldMessenger.of(context).showSnackBar(
-        const SnackBar(
-          content: Text('📍 Centered on your location'),
-          duration: Duration(seconds: 1),
-        ),
-      );
+      SnackbarService.show(context, 'Centered on your location', duration: const Duration(seconds: 1));
 
     } catch (e) {
-      debugPrint("❌ Recenter error: $e");
-      ScaffoldMessenger.of(context).showSnackBar(
-        const SnackBar(
-          content: Text('❌ Failed to center map'),
-          duration: Duration(seconds: 2),
-        ),
-      );
+      debugPrint("Recenter error: $e");
+      SnackbarService.show(context, 'Failed to center map', duration: const Duration(seconds: 2));
     }
   }
 
@@ -612,27 +650,50 @@ class _SharedHomeState extends State<SharedHome> with TickerProviderStateMixin {
   body: SizedBox.expand( // <-- forces Stack to fill entire screen
     child: Stack(
       children: [
-        // Main Map
-        Positioned.fill(
-          child: GoogleMap(
-            initialCameraPosition: _initialCamera,
-            myLocationEnabled: false, //set to true if pasahero loc does not work
-            myLocationButtonEnabled: false, // Disable default button
-            zoomControlsEnabled: false,
-            markers: _getRoleSpecificMarkers(),
-            polylines: _polylines.values.toSet(),
-            onMapCreated: (controller) async {
-              if (!_mapController.isCompleted) {
-                _mapController.complete(controller);
-              }
-              setState(() => _isMapReady = true);
-              debugPrint("✅ Map controller is ready");
-              // Set the global controller so other parts of the app can access it
-              await MapControllerService.instance.setController(controller);
-            },
-            onTap: widget.onMapTap,
-            onCameraMove: _onCameraMove,
-          ),
+        // Main Map (rebuilds when follow mode toggles so we can enable/disable gestures)
+        ValueListenableBuilder<bool>(
+          valueListenable: FollowService.instance.isFollowing,
+          builder: (context, following, _) {
+            return Positioned.fill(
+              child: GoogleMap(
+                initialCameraPosition: _initialCamera,
+                myLocationEnabled: false, //set to true if pasahero loc does not work
+                myLocationButtonEnabled: false, // Disable default button
+                zoomControlsEnabled: false,
+                // When following, prevent user panning/rotating/tilting so camera stays on user.
+                scrollGesturesEnabled: !following,
+                rotateGesturesEnabled: !following,
+                tiltGesturesEnabled: !following,
+                // Keep zoom enabled so user can zoom even while following.
+                zoomGesturesEnabled: true,
+                markers: _getRoleSpecificMarkers(),
+                polylines: _polylines.values.toSet(),
+                onMapCreated: (controller) async {
+                  if (!_mapController.isCompleted) {
+                    _mapController.complete(controller);
+                  }
+                  setState(() => _isMapReady = true);
+                  debugPrint("✅ Map controller is ready");
+                  // Set the global controller so other parts of the app can access it
+                  await MapControllerService.instance.setController(controller);
+                  // If we already have a user location from before the map was ready,
+                  // center the camera now (only once).
+                  if (_currentUserLoc != null && !_hasCenteredOnUser) {
+                    try {
+                      await controller.animateCamera(
+                        CameraUpdate.newLatLngZoom(_currentUserLoc!, 16.0),
+                      );
+                      _hasCenteredOnUser = true;
+                    } catch (e) {
+                      debugPrint('Error centering on map created: $e');
+                    }
+                  }
+                },
+                onTap: widget.onMapTap,
+                onCameraMove: _onCameraMove,
+              ),
+            );
+          },
         ),
 
         // Profile incomplete warning
@@ -648,7 +709,7 @@ class _SharedHomeState extends State<SharedHome> with TickerProviderStateMixin {
                 children: [
                   const Expanded(
                     child: Text(
-                      "⚠️ Please complete your profile to unlock all features.",
+                      "⚠️Please complete your profile to unlock all features.",
                       style: TextStyle(fontSize: 13, fontWeight: FontWeight.w500),
                     ),
                   ),
@@ -721,7 +782,7 @@ class _SharedHomeState extends State<SharedHome> with TickerProviderStateMixin {
           ),
         ),
 
-        // Action buttons - UPPER RIGHT
+        // Action buttons - UPPER RIGHT (coins, center, theme, follow)
         Positioned(
           top: 100,
           right: 16,
@@ -731,14 +792,39 @@ class _SharedHomeState extends State<SharedHome> with TickerProviderStateMixin {
                 mini: true,
                 backgroundColor: const Color.fromARGB(255, 193, 212, 16),
                 onPressed: _showCoinsDialog,
-                child: const Icon(Icons.monetization_on, color: Colors.white, size: 20),
+                child: const Icon(Icons.monetization_on, color: Color.fromARGB(255, 28, 23, 46), size: 20),
               ),
               const SizedBox(height: 8),
               FloatingActionButton(
                 mini: true,
-                backgroundColor: Colors.white,
+                backgroundColor: const Color.fromARGB(255, 28, 23, 46),
                 onPressed: _centerOnUser,
-                child: const Icon(Icons.my_location, color: Colors.blue, size: 20),
+                child: const Icon(Icons.my_location, color: Color.fromARGB(255, 124, 155, 53), size: 20),
+              ),
+              const SizedBox(height: 8),
+              // Theme toggle
+              FloatingActionButton(
+                mini: true,
+                backgroundColor: const Color.fromARGB(255, 28, 23, 46),
+                onPressed: () => ButtonActions.toggleMapTheme(context, null),
+                child: const Icon(Icons.brightness_6, color:Color.fromARGB(255, 124, 155, 53), size: 20),
+              ),
+              const SizedBox(height: 8),
+              // Follow toggle
+              ValueListenableBuilder<bool>(
+                valueListenable: FollowService.instance.isFollowing,
+                builder: (context, following, _) {
+                  return FloatingActionButton(
+                    mini: true,
+                    backgroundColor: const Color.fromARGB(255, 28, 23, 46),
+                    onPressed: () => ButtonActions.toggleFollowMode(context),
+                    child: Icon(
+                      following ? Icons.gps_fixed : Icons.gps_not_fixed,
+                      color: Color.fromARGB(255, 124, 155, 53),
+                      size: 20,
+                    ),
+                  );
+                },
               ),
             ],
           ),
@@ -792,7 +878,14 @@ class _SharedHomeState extends State<SharedHome> with TickerProviderStateMixin {
       child: Container(
         height: double.infinity,
         decoration: BoxDecoration(
-          color: const Color.fromARGB(255, 29, 28, 34),
+          gradient: RadialGradient(
+            center: Alignment.bottomCenter,
+            radius: 5,
+            colors: [ 
+              const Color.fromARGB(255, 4, 3, 5),
+              const Color.fromARGB(255, 97, 79, 139),
+            ],),
+            color: Colors.black.withOpacity(0.95),
           borderRadius: const BorderRadius.only(
             topRight: Radius.circular(35),
             bottomRight: Radius.circular(35),
@@ -819,22 +912,24 @@ class _SharedHomeState extends State<SharedHome> with TickerProviderStateMixin {
                     gradient: LinearGradient(
 
                     colors: const [
-                      Color.fromRGBO(27, 4, 34, 1),
-                      Color.fromARGB(255, 15, 8, 22),
-                      Color.fromARGB(255, 3, 1, 32),
-                      Color.fromARGB(255, 44, 2, 48),
-                      Color.fromARGB(255, 41, 0, 58),
-                      Color.fromARGB(255, 41, 12, 75),
-                      Color.fromARGB(255, 63, 19, 114),
-                      Color.fromARGB(255, 65, 40, 158),
+                      Color.fromARGB(255, 4, 17, 34), // very dark purple
+                      Color.fromARGB(255, 8, 19, 53), // deep plum
+                      Color.fromARGB(255, 24, 16, 51), // rich violet
+                      Color.fromARGB(255, 30, 24, 64), // warm indigo
+                      Color.fromARGB(255, 37, 27, 65), // muted magenta
+                      Color.fromARGB(255, 48, 32, 70), // medium purple
+                      Color.fromARGB(255, 62, 39, 80), // softer purple
+                      Color.fromARGB(255, 77, 49, 99), // lighter purple
                     ],
-                    stops: [0.45,0.55, 0.60, 0.65, 0.70, 0.75, 0.85, 1.0],
+                    // Evenly spaced stops for a smooth transition
+                    stops: [0.0, 0.14, 0.28, 0.42, 0.56, 0.70, 0.84, 1.0],
                     tileMode: TileMode.clamp,
                   ),
                     boxShadow: [
                       BoxShadow(
                         color: Colors.black.withOpacity(0.3),
-                        blurRadius: 3,
+                        blurRadius: 10,
+                        spreadRadius: 2.5,
                         offset: const Offset(0, 8),
                       ),
                     ],
@@ -889,7 +984,9 @@ class _SharedHomeState extends State<SharedHome> with TickerProviderStateMixin {
                   ),
                 ),
               ),
-              SizedBox(height: 10),
+
+            // Map control buttons (recenter, theme toggle, follow toggle, etc.)
+            SizedBox(height: 10),
               ...widget.roleMenu,
   Container(
     margin: const EdgeInsets.only(right: 140,top: 20),
@@ -904,8 +1001,8 @@ class _SharedHomeState extends State<SharedHome> with TickerProviderStateMixin {
         center: Alignment.centerLeft,
         radius: 2.8,
         colors: [
-          Color.fromARGB(255, 105, 105, 105),
-          Color.fromARGB(255, 83, 83, 83),
+         Color.fromARGB(255, 148, 155, 53),
+           Color.fromARGB(255, 28, 100, 50),
         ],
       ),
       borderRadius: const BorderRadius.only(

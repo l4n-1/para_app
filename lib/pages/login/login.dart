@@ -4,6 +4,7 @@ import 'package:firebase_auth/firebase_auth.dart';
 import 'package:cloud_firestore/cloud_firestore.dart';
 import 'package:para2/pages/home/role_router.dart';
 import 'package:para2/services/auth_service.dart';
+import 'package:para2/services/snackbar_service.dart';
 import 'package:para2/pages/login/signup_page.dart';
 
 class LoginPage extends StatefulWidget {
@@ -184,7 +185,7 @@ class _LoginPageState extends State<LoginPage> with SingleTickerProviderStateMix
   }
 
   void _showSnackBar(String message) {
-    ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text(message)));
+    SnackbarService.show(context, message);
   }
 
   InputDecoration _inputDecoration(String hintText) {

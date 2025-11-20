@@ -6,6 +6,7 @@ import 'package:firebase_auth/firebase_auth.dart';
 import 'package:flutter/material.dart';
 
 import 'package:para2/pages/home/tsuper/tsuperhero_home.dart';
+import 'package:para2/services/snackbar_service.dart';
 
 class SignupTsuperhero extends StatefulWidget {
   /// deviceId can be passed from QR scanner; if null, user may manually enter it.
@@ -84,7 +85,7 @@ class _SignupTsuperheroState extends State<SignupTsuperhero> {
 
   void _showSnack(String message) {
     if (!mounted) return;
-    ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text(message)));
+    SnackbarService.show(context, message);
   }
 
   Future<bool> _isUsernameTaken(String username) async {

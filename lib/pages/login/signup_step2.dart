@@ -1,3 +1,4 @@
+import 'package:para2/services/snackbar_service.dart';
 import 'dart:async';
 import 'package:flutter/material.dart';
 import 'package:firebase_auth/firebase_auth.dart';
@@ -207,7 +208,7 @@ class _SignupStep2State extends State<SignupStep2>
   }
 
   void _showSnackBar(String message) {
-    ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text(message)));
+    SnackbarService.show(context, message);
   }
 
   // ✅ UPDATED: Input decoration with show/hide password toggle

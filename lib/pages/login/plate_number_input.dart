@@ -5,6 +5,7 @@ import 'package:firebase_database/firebase_database.dart';
 import 'package:cloud_firestore/cloud_firestore.dart';
 import 'package:para2/pages/home/role_router.dart';
 import 'package:para2/pages/home/shared_home.dart';
+import 'package:para2/services/snackbar_service.dart';
 
 class PlateNumberInputPage extends StatefulWidget {
   final String deviceId;
@@ -33,17 +34,13 @@ class _PlateNumberInputPageState extends State<PlateNumberInputPage> {
     final plate = _plateController.text.trim().toUpperCase();
 
     if (plate.isEmpty || plate.length < 6) {
-      ScaffoldMessenger.of(context).showSnackBar(
-        const SnackBar(content: Text("⚠️ Please enter a valid plate number.")),
-      );
+      SnackbarService.show(context, '⚠️ Please enter a valid plate number.');
       return;
     }
 
     final user = _auth.currentUser;
     if (user == null) {
-      ScaffoldMessenger.of(context).showSnackBar(
-        const SnackBar(content: Text("❌ No user found. Please log in again.")),
-      );
+      SnackbarService.show(context, '❌ No user found. Please log in again.');
       return;
     }
 
@@ -66,9 +63,7 @@ class _PlateNumberInputPageState extends State<PlateNumberInputPage> {
       });
 
       // 🔹 3. Confirmation message
-      ScaffoldMessenger.of(context).showSnackBar(
-        const SnackBar(content: Text('✅ TsuperHero activation successful!')),
-      );
+      SnackbarService.show(context, '✅ TsuperHero activation successful!');
 
       // 🔹 4. Navigate to SharedHome (driver view)
       if (!mounted) return;
@@ -77,9 +72,7 @@ class _PlateNumberInputPageState extends State<PlateNumberInputPage> {
         MaterialPageRoute(builder: (_) => const RoleRouter()),
       );
     } catch (e) {
-      ScaffoldMessenger.of(
-        context,
-      ).showSnackBar(SnackBar(content: Text('❌ Activation failed: $e')));
+      SnackbarService.show(context, '❌ Activation failed: $e');
     } finally {
       if (mounted) setState(() => _isSubmitting = false);
     }
