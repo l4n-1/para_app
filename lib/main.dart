@@ -99,7 +99,7 @@ class MyApp extends StatelessWidget {
           titleTextStyle: GoogleFonts.inter(
             fontSize: 15,
             color: Colors.white),
-          iconColor:  const Color.fromARGB(255, 124, 155, 53),
+          iconColor:  const Color.fromARGB(255, 192, 192, 192),
         ),
         // ✅ ADDED: Better input field styling
         inputDecorationTheme: InputDecorationTheme(

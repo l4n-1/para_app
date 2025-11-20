@@ -1,5 +1,6 @@
 import 'dart:async';
 import 'package:flutter/material.dart';
+import 'package:google_fonts/google_fonts.dart';
 import 'package:google_maps_flutter/google_maps_flutter.dart';
 import 'package:firebase_database/firebase_database.dart';
 import 'package:cloud_firestore/cloud_firestore.dart';
@@ -809,46 +810,74 @@ class _SharedHomeState extends State<SharedHome> with TickerProviderStateMixin {
           right: 0,
           child: SafeArea(
             child: Padding(
-              padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 8),
+              padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 2),
               child: Row(
-                children: [
+                children: [ 
+                  Column(
+                    children: [
                   GestureDetector(
                     onTap: _togglePanel,
                     child: Container(
-                      padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 8),
+                      padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 3),
                       decoration: BoxDecoration(
-                        color: const Color.fromARGB(255, 30, 18, 49),
-                        borderRadius: BorderRadius.circular(12),
+                        color: const Color.fromARGB(255, 16, 16, 36),
+                        borderRadius: BorderRadius.circular(8),
                         
                       ),
-                      child: Row(
+                      child: Column(
                         children: [
-                          Icon(
-                            widget.roleLabel == 'TSUPERHERO' ? Icons.directions_bus : Icons.person,
-                            size: 18,
-                            color: const Color.fromARGB(255, 211, 211, 211),
-                          ),
                           const SizedBox(width: 8),
                           Text(
+                            
                             _displayName,
-                            style: const TextStyle(
-                              color:Color.fromARGB(255, 196, 196, 196), fontWeight: FontWeight.w600, fontSize: 14),
+                            style: TextStyle(
+                              height: 1,
+                              color:Color.fromARGB(255, 196, 196, 196), fontWeight: FontWeight.bold, fontSize: 18,fontFamily: GoogleFonts.inter().fontFamily),
+                          ),
+                          Text( 
+                            widget.roleLabel,
+                            style: TextStyle(
+                              height: 1,
+                              color: Colors.white.withOpacity(0.7),
+                              fontSize: 8.5,
+                              fontFamily: GoogleFonts.inter().fontFamily,
+                              fontWeight: FontWeight.bold,
+                            ),
                           ),
                         ],
                       ),
                     ),
                   ),
+                  Row(
+                    children: [
+                      Text('PROFILE ••• ',
+                      style: TextStyle(
+                        height: 1,
+                        fontSize: 12,
+                        color: const Color.fromARGB(255, 0, 0, 0).withOpacity(0.6),
+                        fontFamily: GoogleFonts.roboto().fontFamily,
+                        fontWeight: FontWeight.w900,
+                      ),
+                      ),
+                    ],
+                  )
+                    ],
+                  ),
+
+
                   const Spacer(),
                   Text(
                     "PARA!",
                     style: TextStyle(
+                      fontStyle: FontStyle.italic,
                       fontWeight: FontWeight.bold,
                       fontSize: 18,
-                      color: Colors.white,
+                      color: const Color.fromARGB(150, 255, 255, 255),
                       shadows: [Shadow(color: Colors.black.withOpacity(1.0), blurRadius: 20)],
                     ),
                   ),
                 ],
+              
               ),
             ),
           ),
@@ -946,8 +975,10 @@ class _SharedHomeState extends State<SharedHome> with TickerProviderStateMixin {
   
   {
     return SafeArea(
-      
-      child: Container(
+      child: 
+      Stack(
+      children: [
+      Container(
         height: double.infinity,
         decoration: BoxDecoration(
           gradient: RadialGradient(
@@ -955,9 +986,9 @@ class _SharedHomeState extends State<SharedHome> with TickerProviderStateMixin {
             radius: 5,
             colors: [ 
               const Color.fromARGB(255, 4, 3, 5),
-              const Color.fromARGB(255, 97, 79, 139),
+              const Color.fromARGB(255, 62, 60, 68),
             ],),
-            color: Colors.black.withOpacity(0.95),
+            color: Colors.black.withOpacity(0.98),
           borderRadius: const BorderRadius.only(
             topRight: Radius.circular(35),
             bottomRight: Radius.circular(35),
@@ -984,17 +1015,12 @@ class _SharedHomeState extends State<SharedHome> with TickerProviderStateMixin {
                     gradient: LinearGradient(
 
                     colors: const [
-                      Color.fromARGB(255, 4, 17, 34), // very dark purple
-                      Color.fromARGB(255, 8, 19, 53), // deep plum
-                      Color.fromARGB(255, 24, 16, 51), // rich violet
-                      Color.fromARGB(255, 30, 24, 64), // warm indigo
-                      Color.fromARGB(255, 37, 27, 65), // muted magenta
-                      Color.fromARGB(255, 48, 32, 70), // medium purple
-                      Color.fromARGB(255, 62, 39, 80), // softer purple
-                      Color.fromARGB(255, 77, 49, 99), // lighter purple
+                      Color.fromARGB(255, 28, 19, 110), // very dark purple
+                      Color.fromARGB(255, 66, 19, 80), // rich violet
+                      Color.fromARGB(255, 64, 27, 95), // warm indigo
+                      Color.fromARGB(255, 35, 34, 129), // lighter purple
                     ],
-                    // Evenly spaced stops for a smooth transition
-                    stops: [0.0, 0.14, 0.28, 0.42, 0.56, 0.70, 0.84, 1.0],
+
                     tileMode: TileMode.clamp,
                   ),
                     boxShadow: [
@@ -1007,53 +1033,88 @@ class _SharedHomeState extends State<SharedHome> with TickerProviderStateMixin {
                     ],
                     borderRadius: const BorderRadius.only(
                       topRight: Radius.circular(35),
-                      bottomRight: Radius.circular(25),
+                      
                     ),
                     color: const Color.fromARGB(255, 49, 8, 126),
                   ),
-                  padding: const EdgeInsets.symmetric(
-                    horizontal: 18,
-                    vertical: 20,
+                  padding: const EdgeInsets.only(
+                    top: 10,
+                    bottom: 10,
+                    left: 10,
+                    right: 40,
                   ),
                   
                 
-                  child: Row(
-                    children: [
-                      CircleAvatar(
-                        radius: 28,
-                        backgroundColor: Colors.grey[400],
-                        child: Icon(
-                          widget.roleLabel == 'TSUPERHERO'
-                              ? Icons.directions_bus
-                              : Icons.person,
-                          color: Colors.white,
-                          size: 28,
-                        ),
+                  child: 
+                  Container(
+                    padding: const EdgeInsets.all(7.5),
+                    decoration: BoxDecoration(
+                      gradient: RadialGradient(colors:  [
+                        Color.fromARGB(255, 0, 0, 0),
+                        Color.fromARGB(255, 28, 26, 32),
+                      ],
+                      center: Alignment.centerLeft,
+                      radius: 3.0,
                       ),
-                      const SizedBox(width: 12),
-                      Column(
-                        crossAxisAlignment: CrossAxisAlignment.start,
-                        children: [
-                          Text(
-                            _displayName,
-                            style: const TextStyle(
-                              fontWeight: FontWeight.bold,
-                              fontSize: 16,
-                              color: Colors.white
-                            ),
-                          ),
 
-                          Text(
-                            widget.roleLabel,
-                            style: const TextStyle(
-                              color: Color.fromARGB(255, 255, 255, 255),
-                              fontSize: 12,
+                      borderRadius: BorderRadius.only(
+                        topRight: Radius.circular(30),
+                        bottomRight: Radius.circular(30),
+                        topLeft: Radius.circular(35),
+                        bottomLeft: Radius.circular(35),
+                      ),
+                    ),
+                    child:
+                    Row(
+                      children: [
+                        CircleAvatar(
+                          radius: 28,
+                          backgroundColor: Colors.grey[400],
+                          child: Icon(
+                            widget.roleLabel == 'TSUPERHERO'
+                                ? Icons.directions_bus
+                                : Icons.person,
+                            color: Colors.white,
+                            size: 32,
+                          ),
+                        ),
+                        const SizedBox(width: 12),
+                        Column(
+                          crossAxisAlignment: CrossAxisAlignment.start,
+                          children: [
+                            Text(
+                              _displayName,
+                              style: const TextStyle(
+                                fontWeight: FontWeight.bold,
+                                fontSize: 16,
+                                color: Colors.white
+                              ),
+                            ),
+
+                            Text(
+                              widget.roleLabel,
+                              style: const TextStyle(
+                                color: Color.fromARGB(255, 255, 255, 255),
+                                fontSize: 11,
                             ),
                           ),
                         ],
                       ),
+                      SizedBox(width: 40),
+                      Container(
+                        padding: EdgeInsets.all(4),
+                        decoration: BoxDecoration(
+                          color: Color.fromARGB(122, 197, 197, 197),
+                          borderRadius: BorderRadius.circular(25),
+                        ) ,
+                      child: Icon(
+                        Icons.arrow_forward_ios,
+                        size: 16,
+                        color: Color.fromARGB(255, 0, 0, 0),
+                        ),
+                      ),
                     ],
-                  ),
+                  ),),
                 ),
               ),
 
@@ -1061,7 +1122,7 @@ class _SharedHomeState extends State<SharedHome> with TickerProviderStateMixin {
             SizedBox(height: 10),
               ...widget.roleMenu,
   Container(
-    margin: const EdgeInsets.only(right: 140,top: 20),
+    margin: const EdgeInsets.only(right: 140,top: 15),
     decoration: 
     BoxDecoration(
       boxShadow: [BoxShadow(
@@ -1073,8 +1134,8 @@ class _SharedHomeState extends State<SharedHome> with TickerProviderStateMixin {
         center: Alignment.centerLeft,
         radius: 2.8,
         colors: [
-         Color.fromARGB(255, 148, 155, 53),
-           Color.fromARGB(255, 28, 100, 50),
+         Color.fromARGB(255, 30, 30, 36),
+           Color.fromARGB(255, 43, 48, 51),
         ],
       ),
       borderRadius: const BorderRadius.only(
@@ -1097,7 +1158,7 @@ class _SharedHomeState extends State<SharedHome> with TickerProviderStateMixin {
                 padding: const EdgeInsets.symmetric(vertical: 18),
                 child: Column(
                   children: [
-                    const SizedBox(height: 100),
+                    
                     Image.asset('assets/Paralogotemp.png', height: 68),
                     const Text(
                       'PARA! - Transport App',
@@ -1110,7 +1171,11 @@ class _SharedHomeState extends State<SharedHome> with TickerProviderStateMixin {
           ),
         ),
       ),
-    );
+      
+      ],
+      ),
+    
+    );  
   }
 
   // Add missing variable declaration

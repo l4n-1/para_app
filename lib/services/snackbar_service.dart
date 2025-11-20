@@ -6,7 +6,7 @@ class SnackbarService {
   static void show(BuildContext context, String message, {Duration? duration}) {
     final snack = SnackBar(
       behavior: SnackBarBehavior.floating,
-      backgroundColor: Colors.transparent,
+      backgroundColor: const Color.fromARGB(0, 0, 0, 0),
       elevation: 0,
       duration: duration ?? const Duration(seconds: 2),
       margin: const EdgeInsets.only(top: 30, bottom: 730), // left/right will be handled inside
@@ -18,8 +18,8 @@ class SnackbarService {
             child: Container(
               padding: const EdgeInsets.symmetric(horizontal: 25, vertical: 12),
               decoration: BoxDecoration(
-                color: const Color.fromARGB(179, 21, 5, 43),
-                borderRadius: BorderRadius.circular(20),
+                color: const Color.fromARGB(255, 27, 23, 32),
+                borderRadius: BorderRadius.circular(15),
               ),
               child: Text(
                 message,

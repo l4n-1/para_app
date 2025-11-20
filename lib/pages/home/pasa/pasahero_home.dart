@@ -16,6 +16,7 @@ import 'package:para2/pages/settings/profile_settings.dart';
 import 'package:para2/services/RealtimeDatabaseService.dart';
 import 'package:para2/services/button_actions.dart';
 import 'package:para2/services/snackbar_service.dart';
+import 'package:para2/services/map_theme_service.dart';
 import 'package:para2/widgets/compact_ads_button.dart';
 import 'package:para2/pages/biyahe/biyahe_logs_page.dart';
 
@@ -619,7 +620,9 @@ class _PasaheroHomeState extends State<PasaheroHome> with WidgetsBindingObserver
 
   List<Widget> _buildPasaheroMenu() => [
     Container(
-      margin: EdgeInsets.only(top: 15,right: 15,bottom: 8),
+    
+      padding: const EdgeInsets.only(top: 10, bottom: 10),
+      margin: EdgeInsets.only(right: 10,bottom: 8),
       decoration: BoxDecoration(
       color: const Color.fromARGB(255, 23, 22, 27),
       borderRadius: BorderRadius.only(topRight: Radius.circular(17),bottomRight: Radius.circular(17)),
@@ -643,23 +646,22 @@ class _PasaheroHomeState extends State<PasaheroHome> with WidgetsBindingObserver
     ),
     const Divider(
       color:  Color.fromARGB(255, 52, 46, 53),),
-    
     ListTile(
       visualDensity: const VisualDensity(vertical: -4),
-      leading: const Icon(Icons.person),
-      title: const Text('Profile Settings'),
-      onTap: () {
-        Navigator.push(
-          context,
-          MaterialPageRoute(builder: (_) => const ProfileSettingsPage()),
-        ).then((_) => _checkProfileCompletion());
-      },
+      leading: ValueListenableBuilder<bool>(
+        valueListenable: MapThemeService.instance.isDarkMode,
+        builder: (context, isDark, child) {
+          return Icon(isDark ? Icons.dark_mode : Icons.light_mode);
+        },
+      ),
+      title: const Text('Display Theme'),
+      onTap: () => ButtonActions.toggleMapTheme(context, null),
     ),
     const Divider(
       color:  Color.fromARGB(255, 52, 46, 53),),
     ListTile(
       visualDensity: const VisualDensity(vertical: -4),
-      leading: const Icon(Icons.settings),
+      leading: const Icon(Icons.settings_sharp),
       title: const Text('Settings'),
       onTap: () {
         Navigator.push(
@@ -667,12 +669,6 @@ class _PasaheroHomeState extends State<PasaheroHome> with WidgetsBindingObserver
           MaterialPageRoute(builder: (_) => const ProfileSettingsPage()),
         );
       },
-      trailing: IconButton(
-        icon: const Icon(Icons.brightness_6),
-        tooltip: 'Toggle map theme',
-        color: Colors.white,
-        onPressed: () => ButtonActions.toggleMapTheme(context, null),
-      ),
     ),
     const Divider(
       color:  Color.fromARGB(255, 52, 46, 53),),
@@ -688,7 +684,66 @@ class _PasaheroHomeState extends State<PasaheroHome> with WidgetsBindingObserver
         );
       },
     ),
+      const Divider(
+        color:  Color.fromARGB(255, 52, 46, 53),),
+
+
+
+    const SizedBox(height: 70),
+
+
+
+
+    ListTile(
+      visualDensity: const VisualDensity(vertical: -4),
+      leading: const Icon(Icons.feedback),
+      title: const Text('Feedback'),
+      titleTextStyle: TextStyle(fontSize: 13),
+      onTap: () {
+        Navigator.push(
+          context,
+          MaterialPageRoute(builder: (_) => const QRScanPage()),
+        );
+      },
+    ),
     
+    ListTile(
+      visualDensity: const VisualDensity(vertical: -4),
+      leading: const Icon(Icons.handshake),
+      title: const Text('Support Us'),
+      titleTextStyle: TextStyle(fontSize: 13),
+      onTap: () {
+        Navigator.push(
+          context,
+          MaterialPageRoute(builder: (_) => const QRScanPage()),
+        );
+      },
+    ),
+
+    ListTile(
+      visualDensity: const VisualDensity(vertical: -4),
+      leading: const Icon(Icons.book),
+      title: const Text('Terms and Conditions'),
+      titleTextStyle: TextStyle(fontSize: 13),
+      onTap: () {
+        Navigator.push(
+          context,
+          MaterialPageRoute(builder: (_) => const QRScanPage()),
+        );
+      },
+    ),
+    ListTile(
+      visualDensity: const VisualDensity(vertical: -4),
+      leading: const Icon(Icons.help_center_rounded),
+      title: const Text('About PARA!'),
+      titleTextStyle: TextStyle(fontSize: 13),
+      onTap: () {
+        Navigator.push(
+          context,
+          MaterialPageRoute(builder: (_) => const QRScanPage()),
+        );
+      },
+    ),
     ],
     ),
     ),
