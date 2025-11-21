@@ -1,5 +1,4 @@
 import 'package:flutter/material.dart';
-import 'package:para2/pages/login/qr_scan_page.dart';
 import 'package:para2/pages/login/signup_step2.dart';
 import 'package:para2/services/snackbar_service.dart';
 
@@ -16,8 +15,7 @@ class _SignupPageState extends State<SignupPage> {
   final TextEditingController _userNameController = TextEditingController();
   DateTime? _selectedDOB;
 
-  // ✅ ADDED: Show/hide password for future steps reference
-  bool _obscurePassword = true;
+  // (no local show/hide state required on this page)
 
   Future<void> _pickDOB() async {
     DateTime now = DateTime.now();
@@ -150,19 +148,6 @@ class _SignupPageState extends State<SignupPage> {
                 ),
               ),
               const SizedBox(height: 40),
-              ElevatedButton.icon(
-                onPressed: () {
-                  Navigator.push(
-                    context,
-                    MaterialPageRoute(builder: (_) => const QRScanPage()),
-                  );
-                },
-                icon: const Icon(Icons.qr_code_scanner),
-                label: const Text("Scan QR to Register as Tsuperhero"),
-                style: ElevatedButton.styleFrom(
-                  backgroundColor: const Color.fromARGB(255, 73, 172, 123),
-                ),
-              ),
             ],
           ),
         ),
