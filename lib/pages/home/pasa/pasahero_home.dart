@@ -22,6 +22,7 @@ import 'package:para2/pages/biyahe/biyahe_logs_page.dart';
 
 class PasaheroHome extends StatefulWidget {
   const PasaheroHome({super.key});
+  
 
   @override
   State<PasaheroHome> createState() => _PasaheroHomeState();
@@ -476,6 +477,77 @@ class _PasaheroHomeState extends State<PasaheroHome> with WidgetsBindingObserver
         _isJeepneyOnRoute(entry.key)
     );
 
+    // When compact is true we render a condensed widget suitable for a row
+    if (compact) {
+      if (availableJeepneys.isEmpty) {
+        return SizedBox(
+          width: 180,
+          child: Container(
+            padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 6),
+            decoration: BoxDecoration(
+              color: Colors.transparent,
+              borderRadius: BorderRadius.circular(8),
+            ),
+            child: const Text(
+              'No jeepneys on your route',
+              maxLines: 2,
+              overflow: TextOverflow.ellipsis,
+              textAlign: TextAlign.center,
+              style: TextStyle(color: Colors.white, fontSize: 12),
+            ),
+          ),
+        );
+      }
+
+      // Show up to 2 items in compact mode to fit in a row
+      final items = availableJeepneys.take(2).map((entry) {
+        final id = entry.key;
+        final data = entry.value;
+        LatLng jeepPos = LatLng(data['lat'], data['lng']);
+        double? eta;
+        if (_userLoc != null) {
+          eta = _computeETA(jeepPos, _userLoc!, data['speed'] ?? 20);
+        }
+
+        final currentPassengers = data['currentPassengers'] ?? 0;
+        final maxCapacity = data['maxCapacity'] ?? 20;
+        final availableSeats = maxCapacity - currentPassengers;
+
+        return GestureDetector(
+          onTap: () {
+            setState(() {
+              _selectedJeepId = id;
+              _hasSelectedJeep = true;
+              _updatePolyline();
+            });
+            SnackbarService.show(context, '✅ Selected Jeepney $id ($availableSeats seats available)', duration: const Duration(seconds: 1));
+          },
+          child: Container(
+            width: 180,
+            margin: const EdgeInsets.only(right: 8),
+            padding: const EdgeInsets.all(8),
+            decoration: BoxDecoration(
+              color: Colors.white.withOpacity(0.06),
+              borderRadius: BorderRadius.circular(10),
+            ),
+            child: Column(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                Text('Jeep $id', style: const TextStyle(color: Colors.white, fontWeight: FontWeight.bold, fontSize: 13)),
+                const SizedBox(height: 6),
+                Text(eta != null && eta != double.infinity ? '${eta.toStringAsFixed(1)} min' : 'Calculating', style: const TextStyle(color: Colors.white70, fontSize: 12)),
+                const SizedBox(height: 6),
+                Text('$availableSeats seats', style: const TextStyle(color: Colors.greenAccent, fontSize: 12)),
+              ],
+            ),
+          ),
+        );
+      }).toList();
+
+      return Row(children: items);
+    }
+
+    // Default (full) layout
     if (availableJeepneys.isEmpty) {
       return _buildInfoCard("No available jeepneys with seats on your route nearby.");
     }
@@ -749,6 +821,31 @@ class _PasaheroHomeState extends State<PasaheroHome> with WidgetsBindingObserver
     ),
   ];
 
+  List<Widget> _buildPasaheroActions() => [
+    Column(
+      children: [
+        Row(
+          children: [
+
+            SingleChildScrollView(
+              child: _buildJeepneySuggestionList()),
+            
+            
+            
+             
+
+
+          ],
+        ),
+      ],
+
+    )
+
+
+
+
+  ];
+
   Future<void> _handleSignOut() async {
     await _positionStream?.cancel();
     _positionStream = null;
@@ -797,8 +894,10 @@ class _PasaheroHomeState extends State<PasaheroHome> with WidgetsBindingObserver
       roleLabel: 'PASAHERO',
       onSignOut: _handleSignOut,
       roleMenu: _buildPasaheroMenu(),
+      roleActions: _buildPasaheroActions(),
       roleContentBuilder: _buildRoleContent,
       onMapTap: _onMapTap,
+
     );
   }
 }

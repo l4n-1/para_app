@@ -13,6 +13,10 @@ exports.claimBaryaBox = functions.https.onRequest(async (req, res) => {
   try {
     let body = req.body;
 
+    // Diagnostic: log incoming request briefly (avoid logging sensitive tokens)
+    console.log('🔔 claimBaryaBox invoked. method=', req.method);
+    console.log('🔎 raw req.headers:', Object.keys(req.headers));
+
     // 🧩 Parse body if sent as raw JSON string
     if (typeof body === "string") {
       try {
@@ -23,29 +27,63 @@ exports.claimBaryaBox = functions.https.onRequest(async (req, res) => {
       }
     }
 
-    const deviceId = (body.deviceId || body.device_id || "").trim();
-    const uid = (body.uid || "").trim();
+    // Support multiple body formats: parsed object, raw JSON string, or rawBody buffer
+    let deviceId = (body.deviceId || body.device_id || "").trim();
+    let uid = (body.uid || "").trim();
+
+    // Fallback: try parsing rawBody if the parsed body did not contain fields
+    if ((!deviceId || !uid) && req.rawBody && req.rawBody.length > 0) {
+      try {
+        const raw = req.rawBody.toString();
+        console.log('🧾 rawBody present:', raw.length, 'bytes');
+        const parsedRaw = JSON.parse(raw);
+        deviceId = deviceId || (parsedRaw.deviceId || parsedRaw.device_id || "").trim();
+        uid = uid || (parsedRaw.uid || "").trim();
+      } catch (err) {
+        // ignore JSON parse errors here; we'll handle missing fields below
+        console.log('⚠️ rawBody parse failed:', err.message);
+      }
+    }
+
+    console.log('📥 parsed body:', {
+      deviceId: typeof body === 'string' ? '<string>' : body.deviceId,
+      uid: typeof body === 'string' ? '<string>' : body.uid,
+    });
 
     if (!deviceId || !uid) {
+      console.warn('🚫 Missing deviceId or uid after parsing. body keys=', Object.keys(body || {}));
+      // Log raw body for debugging (do not log sensitive tokens)
+      try {
+        if (req.rawBody && req.rawBody.length > 0) console.log('RAW_BODY:', req.rawBody.toString());
+      } catch (e) {}
       return res.status(400).send({ success: false, message: "deviceId and uid required" });
     }
 
     const normalizedId = deviceId.toLowerCase();
+    console.log('🔁 normalizedId =', normalizedId, 'uid =', uid);
 
     // 🔍 Get or create Firestore doc for the box
     const boxRef = db.collection("baryaBoxes").doc(normalizedId);
     const boxSnap = await boxRef.get();
+    console.log('📦 boxSnap.exists =', boxSnap.exists);
 
     if (!boxSnap.exists) {
-      await boxRef.set({
-        deviceId: normalizedId,
-        createdAt: admin.firestore.FieldValue.serverTimestamp(),
-        status: "unclaimed",
-      });
-      console.log(`✨ Auto-created new BaryaBox doc: ${normalizedId}`);
+      try {
+        await boxRef.set({
+          deviceId: normalizedId,
+          createdAt: admin.firestore.FieldValue.serverTimestamp(),
+          status: "unclaimed",
+        });
+        console.log(`✨ Auto-created new BaryaBox doc: ${normalizedId}`);
+      } catch (err) {
+        console.error('❌ Failed to auto-create BaryaBox doc:', err);
+        return res.status(500).send({ success: false, message: 'Failed to create box doc' });
+      }
     }
 
-    const boxData = (await boxRef.get()).data() || {};
+    const boxSnap2 = await boxRef.get();
+    const boxData = boxSnap2.exists ? boxSnap2.data() || {} : {};
+    console.log('📦 boxData =', boxData);
 
     // 👀 Already claimed?
     if (boxData.claimedBy && boxData.claimedBy === uid) {
@@ -62,9 +100,12 @@ exports.claimBaryaBox = functions.https.onRequest(async (req, res) => {
 
     // 🔗 Check if RTDB tracker exists
     const trackerRef = rtdb.ref(`devices/${trackerId}`);
+    console.log('🔗 checking RTDB path devices/' + trackerId);
     const trackerSnap = await trackerRef.once("value");
+    console.log('🔗 trackerSnap.exists =', trackerSnap.exists());
 
     if (!trackerSnap.exists()) {
+      console.warn('⚠️ RTDB tracker missing for', trackerId);
       return res.status(404).send({
         success: false,
         message: `No tracker found in RTDB for ${trackerId}`,
@@ -111,6 +152,7 @@ exports.claimBaryaBox = functions.https.onRequest(async (req, res) => {
     );
 
     await batch.commit();
+    console.log('✅ Firestore batch committed for uid=', uid, 'box=', normalizedId);
 
     // ✅ Update RTDB tracker binding
     await trackerRef.update({
@@ -118,6 +160,7 @@ exports.claimBaryaBox = functions.https.onRequest(async (req, res) => {
       driverUid: uid,
       boundAt: admin.database.ServerValue.TIMESTAMP,
     });
+    console.log('✅ RTDB tracker updated for', trackerId);
 
     // ✅ Return success with tracker name
     return res.send({
