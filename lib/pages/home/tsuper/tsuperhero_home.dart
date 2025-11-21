@@ -8,10 +8,14 @@ import 'package:para2/pages/login/login.dart';
 import 'package:para2/pages/home/shared_home.dart';
 import 'package:para2/pages/login/qr_scan_page.dart';
 import 'package:para2/services/RealtimeDatabaseService.dart';
+import 'package:para2/services/button_actions.dart';
+import 'package:para2/services/map_theme_service.dart';
 import 'package:para2/theme/app_icons.dart';
 import 'package:para2/pages/settings/profile_settings.dart';
 import 'package:para2/pages/biyahe/biyahe_logs_page.dart';
 import 'package:para2/services/snackbar_service.dart';
+
+
 
 class TsuperheroHome extends StatefulWidget {
   const TsuperheroHome({super.key});
@@ -344,6 +348,7 @@ class _TsuperheroHomeState extends State<TsuperheroHome> {
       roleLabel: 'TSUPERHERO',
       onSignOut: _handleSignOut,
       roleMenu: _buildDriverMenu(),
+      roleActions: _buildDriverActions(),
       roleContentBuilder: (context, role, userLoc, onMapTap) =>
           _buildDriverContent(),
     );
@@ -533,71 +538,141 @@ class _TsuperheroHomeState extends State<TsuperheroHome> {
     );
   }
 
-  List<Widget> _buildDriverMenu() {
-    return [
-      // ADD TO BOTH FILES IN _buildPasaheroMenu() AND _buildDriverMenu()
-      ListTile(
-        leading: const Icon(Icons.history),
-        title: const Text('Biyahe Logs'),
-        onTap: () {
-          Navigator.push(
-            context,
-            MaterialPageRoute(
-              builder: (_) => BiyaheLogsPage(userType: 'tsuperhero'),
+  List<Widget> _buildDriverMenu() => [
+    Container(
+    
+      padding: const EdgeInsets.only(top: 10, bottom: 10),
+      margin: EdgeInsets.only(right: 10,bottom: 8),
+      decoration: BoxDecoration(
+      color: const Color.fromARGB(255, 23, 22, 27),
+      borderRadius: BorderRadius.only(topRight: Radius.circular(17),bottomRight: Radius.circular(17)),
+      ),
+      child: Column (
+        
+        children: [
+    
+          ListTile(
+            visualDensity: const VisualDensity(vertical: -4),
+              leading: const Icon(Icons.history),
+              title: const Text('Biyahe Logs'),
+              onTap: () {
+                Navigator.push(
+                  context,
+                  MaterialPageRoute(
+                    builder: (_) => BiyaheLogsPage(userType: 'pasahero'), // or 'tsuperhero'
+                  ),
+                );
+              },
             ),
-          );
-        },
+            const Divider(
+              color:  Color.fromARGB(255, 52, 46, 53),),
+            ListTile(
+              visualDensity: const VisualDensity(vertical: -4),
+              leading: ValueListenableBuilder<bool>(
+                valueListenable: MapThemeService.instance.isDarkMode,
+                builder: (context, isDark, child) {
+                  return Icon(isDark ? Icons.dark_mode : Icons.light_mode);
+                },
+              ),
+              title: const Text('Display Theme'),
+              onTap: () => ButtonActions.toggleMapTheme(context, null),
+            ),
+            const Divider(
+              color:  Color.fromARGB(255, 52, 46, 53),),
+            ListTile(
+              visualDensity: const VisualDensity(vertical: -4),
+              leading: const Icon(Icons.settings_sharp),
+              title: const Text('Settings'),
+              onTap: () {
+                Navigator.push(
+                  context,
+                  MaterialPageRoute(builder: (_) => const ProfileSettingsPage()),
+                );
+              },
+            ),
+            const Divider(
+              color:  Color.fromARGB(255, 52, 46, 53),),
+            ListTile(
+              visualDensity: const VisualDensity(vertical: -4),
+              leading: const Icon(Icons.qr_code_2),
+              title: const Text('Scan QR to Become Tsuperhero'),
+              titleTextStyle: TextStyle(fontSize: 13),
+              onTap: () {
+                Navigator.push(
+                  context,
+                  MaterialPageRoute(builder: (_) => const QRScanPage()),
+                );
+              },
+            ),
+              const Divider(
+                color:  Color.fromARGB(255, 52, 46, 53),),
+
+
+
+            const SizedBox(height: 70),
+
+
+
+
+            ListTile(
+              visualDensity: const VisualDensity(vertical: -4),
+              leading: const Icon(Icons.feedback),
+              title: const Text('Feedback'),
+              titleTextStyle: TextStyle(fontSize: 13),
+              onTap: () {
+                Navigator.push(
+                  context,
+                  MaterialPageRoute(builder: (_) => const QRScanPage()),
+                );
+              },
+            ),
+            
+            ListTile(
+              visualDensity: const VisualDensity(vertical: -4),
+              leading: const Icon(Icons.handshake),
+              title: const Text('Support Us'),
+              titleTextStyle: TextStyle(fontSize: 13),
+              onTap: () {
+                Navigator.push(
+                  context,
+                  MaterialPageRoute(builder: (_) => const QRScanPage()),
+                );
+              },
+            ),
+
+            ListTile(
+              visualDensity: const VisualDensity(vertical: -4),
+              leading: const Icon(Icons.book),
+              title: const Text('Terms and Conditions'),
+              titleTextStyle: TextStyle(fontSize: 13),
+              onTap: () {
+                Navigator.push(
+                  context,
+                  MaterialPageRoute(builder: (_) => const QRScanPage()),
+                );
+              },
+            ),
+            ListTile(
+              visualDensity: const VisualDensity(vertical: -4),
+              leading: const Icon(Icons.help_center_rounded),
+              title: const Text('About PARA!'),
+              titleTextStyle: TextStyle(fontSize: 13),
+              onTap: () {
+                Navigator.push(
+                  context,
+                  MaterialPageRoute(builder: (_) => const QRScanPage()),
+                );
+              },
+            ),
+        ],
       ),
-      ListTile(
-        leading: const Icon(Icons.qr_code_scanner),
-        title: const Text('Scan Activation QR'),
-        onTap: () {
-          Navigator.push(
-            context,
-            MaterialPageRoute(builder: (_) => const QRScanPage()),
-          );
-        },
-      ),
-      ListTile(
-        leading: const Icon(Icons.people),
-        title: const Text('Passenger Management'),
-        subtitle: Text('Current: $_currentPassengers/$_maxCapacity'),
-        onTap: () {
-          SnackbarService.show(context, 'Use the passenger counter on main screen');
-        },
-      ),
-      ListTile(
-        leading: const Icon(Icons.route),
-        title: const Text('Assigned Route'),
-        onTap: () {
-          Navigator.push(
-            context,
-            MaterialPageRoute(builder: (_) => const ProfileSettingsPage()),
-          );
-        },
-      ),
-      ListTile(
-        leading: const Icon(Icons.person),
-        title: const Text('Profile Settings'),
-        onTap: () {
-          Navigator.push(
-            context,
-            MaterialPageRoute(builder: (_) => const ProfileSettingsPage()),
-          );
-        },
-      ),
-      ListTile(
-        leading: const Icon(Icons.settings),
-        title: const Text('Driver Settings'),
-        onTap: () {
-          Navigator.push(
-            context,
-            MaterialPageRoute(builder: (_) => const ProfileSettingsPage()),
-          );
-        },
-      ),
-    ];
-  }
+    ),
+  ];
+      // ADD TO BOTH FILES IN _buildPasaheroMenu() AND _buildDriverMenu()
+
+  List<Widget> _buildDriverActions() => [
+    
+  ];
 
   Future<void> _handleSignOut() async {
     await _auth.signOut();

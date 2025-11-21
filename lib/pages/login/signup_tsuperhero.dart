@@ -39,10 +39,14 @@ class _SignupTsuperheroState extends State<SignupTsuperhero> {
   Timer? _resendThrottleTimer;
   bool _canResend = true;
 
+  // Show/hide password
+  bool _obscurePassword = true;
+  bool _obscureConfirmPassword = true;
+
   // Validation regexes
   final RegExp _contactRegex = RegExp(r'^09\d{9}$');
   final RegExp _plateRegex = RegExp(r'^[A-Z]{3}\s?\d{3,4}$');
-  final RegExp _passwordRegex = RegExp(r'^(?=.*[A-Z])(?=.*\d).{8,}$');
+  final RegExp _passwordRegex = RegExp(r'^(?=.*[a-z])(?=.*[A-Z])(?=.*\d)(?=.*[@$!%*?&])[A-Za-z\d@$!%*?&]{8,}$');
 
   @override
   void initState() {
@@ -70,7 +74,7 @@ class _SignupTsuperheroState extends State<SignupTsuperhero> {
     super.dispose();
   }
 
-  InputDecoration _inputDecoration(String hintText) {
+  InputDecoration _inputDecoration(String hintText, {String? errorText, bool isPassword = false, VoidCallback? onToggleVisibility, bool obscureText = true}) {
     return InputDecoration(
       hintText: hintText,
       border: OutlineInputBorder(
@@ -80,6 +84,22 @@ class _SignupTsuperheroState extends State<SignupTsuperhero> {
       filled: true,
       fillColor: Colors.grey[200],
       contentPadding: const EdgeInsets.symmetric(horizontal: 20, vertical: 16),
+      errorText: errorText,
+      errorStyle: const TextStyle(color: Colors.red, fontSize: 12),
+      errorBorder: OutlineInputBorder(
+        borderRadius: BorderRadius.circular(25),
+        borderSide: const BorderSide(color: Colors.red),
+      ),
+      focusedErrorBorder: OutlineInputBorder(
+        borderRadius: BorderRadius.circular(25),
+        borderSide: const BorderSide(color: Colors.red),
+      ),
+      suffixIcon: isPassword
+          ? IconButton(
+              icon: Icon(obscureText ? Icons.visibility_off : Icons.visibility, color: Colors.grey[600]),
+              onPressed: onToggleVisibility,
+            )
+          : null,
     );
   }
 
@@ -100,6 +120,11 @@ class _SignupTsuperheroState extends State<SignupTsuperhero> {
 
   Future<bool> _isDeviceLinked(String deviceId) async {
     final q = await _db.collection('users').where('deviceId', isEqualTo: deviceId).limit(1).get();
+    return q.docs.isNotEmpty;
+  }
+
+  Future<bool> _isDeviceReal(String deviceId) async {
+    final q = await _db.collection('baryaBoxes').where('deviceId', isEqualTo: deviceId).limit(1).get();
     return q.docs.isNotEmpty;
   }
 
@@ -141,6 +166,11 @@ class _SignupTsuperheroState extends State<SignupTsuperhero> {
         return;
       }
 
+      if (!await _isDeviceReal(deviceId)) {
+        _showSnack('No records found for this device ID.');
+        setState(() => _isLoading = false);
+        return;
+      }
       // Create auth user
       final userCredential = await _auth.createUserWithEmailAndPassword(
         email: email,
@@ -160,6 +190,14 @@ class _SignupTsuperheroState extends State<SignupTsuperhero> {
         'email': email,
         'role': 'tsuperhero',
         'createdAt': FieldValue.serverTimestamp(),
+      });
+
+      await _db.collection('baryaBoxes').doc(deviceId).set({
+        'claimedAt': FieldValue.serverTimestamp(),
+        'claimedBy': uid,
+        'deviceId': deviceId,
+        'status': 'claimed',
+        
       });
 
       // Send verification email
@@ -324,7 +362,7 @@ class _SignupTsuperheroState extends State<SignupTsuperhero> {
   String? _validatePassword(String? v) {
     if (v == null || v.isEmpty) return 'Password is required';
     if (!_passwordRegex.hasMatch(v)) {
-      return 'Password must be ≥8 chars, contain 1 uppercase and 1 number';
+      return 'For security, password should have at least:\n• 8+ characters\n• 1 uppercase letter\n• 1 lowercase letter\n• 1 number\n• 1 special character';
     }
     return null;
   }
@@ -334,14 +372,14 @@ class _SignupTsuperheroState extends State<SignupTsuperhero> {
     if (v != _passwordController.text) return 'Passwords do not match';
     return null;
   }
-
+  
   @override
   Widget build(BuildContext context) {
     return Scaffold(
       backgroundColor: const Color.fromARGB(255, 233, 233, 231),
       appBar: AppBar(
         title: const Text('TsuperHero Signup'),
-        backgroundColor: const Color.fromARGB(255, 240, 241, 241),
+        backgroundColor: const Color.fromARGB(0, 240, 241, 241),
         centerTitle: true,
       ),
       body: SafeArea(
@@ -414,8 +452,17 @@ class _SignupTsuperheroState extends State<SignupTsuperhero> {
                 // Password
                 TextFormField(
                   controller: _passwordController,
-                  decoration: _inputDecoration('Password (≥8, 1 uppercase, 1 number)'),
-                  obscureText: true,
+                  decoration: _inputDecoration(
+                    'Password (≥8, include uppercase, lowercase, number, special char)',
+                    isPassword: true,
+                    onToggleVisibility: () {
+                      setState(() {
+                        _obscurePassword = !_obscurePassword;
+                      });
+                    },
+                    obscureText: _obscurePassword,
+                  ),
+                  obscureText: _obscurePassword,
                   validator: _validatePassword,
                 ),
                 const SizedBox(height: 10),
@@ -423,8 +470,17 @@ class _SignupTsuperheroState extends State<SignupTsuperhero> {
                 // Confirm password
                 TextFormField(
                   controller: _confirmController,
-                  decoration: _inputDecoration('Confirm Password'),
-                  obscureText: true,
+                  decoration: _inputDecoration(
+                    'Confirm Password',
+                    isPassword: true,
+                    onToggleVisibility: () {
+                      setState(() {
+                        _obscureConfirmPassword = !_obscureConfirmPassword;
+                      });
+                    },
+                    obscureText: _obscureConfirmPassword,
+                  ),
+                  obscureText: _obscureConfirmPassword,
                   validator: _validateConfirm,
                 ),
                 const SizedBox(height: 20),

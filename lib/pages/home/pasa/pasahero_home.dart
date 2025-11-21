@@ -50,7 +50,9 @@ class _PasaheroHomeState extends State<PasaheroHome> with WidgetsBindingObserver
   final Set<Polyline> _polylines = {};
 
   // Route matching variables
-  final double _routeMatchingThreshold = 2.0; // km threshold for route matching
+  final double _routeMatchingThreshold = 2.0;
+
+  
 
   @override
   void initState() {
@@ -467,15 +469,15 @@ class _PasaheroHomeState extends State<PasaheroHome> with WidgetsBindingObserver
   }
 
   // ✅ Enhanced jeepney suggestion list with route matching and capacity info
-  Widget _buildJeepneySuggestionList() {
+  Widget _buildJeepneySuggestionList({bool compact = false}) {
     if (!_hasSetDestination) return const SizedBox.shrink();
 
     // Filter online jeepneys with available seats AND on route
     final availableJeepneys = _jeepneys.entries.where((entry) =>
-    entry.value['isOnline'] == true &&
+      entry.value['isOnline'] == true &&
         entry.value['hasAvailableSeats'] == true &&
         _isJeepneyOnRoute(entry.key)
-    );
+    ).toList();
 
     // When compact is true we render a condensed widget suitable for a row
     if (compact) {
@@ -635,46 +637,7 @@ class _PasaheroHomeState extends State<PasaheroHome> with WidgetsBindingObserver
     child: Center(child: Text(text)),
   );
 
-  Widget _buildParaButton() {
-    final isProfileComplete = !_isProfileIncomplete;
-    final isEnabled = _hasSetDestination && _hasSelectedJeep && isProfileComplete;
-
-    return Align(
-      alignment: Alignment.bottomCenter,
-      child: Padding(
-        padding: const EdgeInsets.only(bottom: 20.0),
-        child: ElevatedButton(
-          onPressed: isEnabled ? _sendParaSignal : null,
-          style: ElevatedButton.styleFrom(
-            backgroundColor: isEnabled
-                ? Colors.greenAccent.shade700
-                : Colors.grey,
-            padding: const EdgeInsets.symmetric(horizontal: 40, vertical: 14),
-            shape: RoundedRectangleBorder(
-              borderRadius: BorderRadius.circular(30),
-            ),
-          ),
-          child: _isProfileIncomplete
-              ? const Text(
-            'Complete Profile First',
-            style: TextStyle(
-              fontWeight: FontWeight.bold,
-              fontSize: 14,
-              color: Colors.white,
-            ),
-          )
-              : const Text(
-            'PARA!',
-            style: TextStyle(
-              fontWeight: FontWeight.bold,
-              fontSize: 16,
-              color: Colors.white,
-            ),
-          ),
-        ),
-      ),
-    );
-  }
+ 
 
   // ✅ ADDED: Compact ads button for top-right
   Widget _buildCompactAdsButton() {
@@ -878,7 +841,7 @@ class _PasaheroHomeState extends State<PasaheroHome> with WidgetsBindingObserver
           children: [
             if (_showHint && _isLocationInitialized)
             _buildJeepneySuggestionList(),
-            _buildParaButton(),
+
           ],
         ),
 

@@ -6,7 +6,7 @@ import 'package:cloud_firestore/cloud_firestore.dart';
 import 'package:http/http.dart' as http;
 import 'package:image_picker/image_picker.dart';
 import 'package:para2/pages/home/role_router.dart';
-import 'package:para2/pages/login/tsuperhero_signup_page.dart';
+import 'package:para2/pages/login/signup_tsuperhero.dart';
 import 'package:para2/services/snackbar_service.dart';
 
 class QRScanPage extends StatefulWidget {
@@ -20,21 +20,58 @@ class _QRScanPageState extends State<QRScanPage> {
   final MobileScannerController _controller = MobileScannerController();
   final ImagePicker _imagePicker = ImagePicker();
   bool _isProcessing = false;
+  // Track recently scanned device IDs to debounce repeated detections
+  final Map<String, DateTime> _recentScans = {};
 
   // 🔗 Replace this with your deployed Firebase Function URL
   final String functionUrl = "https://claimbaryabox-elu2otbf7q-uc.a.run.app";
+
+  // Call the claim function with JSON body and return parsed result map
+  Future<Map<String, dynamic>> _callClaimFunction(String deviceId, String uid) async {
+    try {
+      final uri = Uri.parse(functionUrl);
+      final body = jsonEncode({'deviceId': deviceId, 'uid': uid});
+      final resp = await http
+          .post(uri, headers: {'Content-Type': 'application/json'}, body: body)
+          .timeout(const Duration(seconds: 15));
+
+      final status = resp.statusCode;
+      final respBody = resp.body;
+      debugPrint('➡️ POST ${uri.toString()} status=$status body=$respBody');
+      if (status != 200) {
+        return {'success': false, 'status': status, 'message': 'HTTP ${status}: ${respBody}'};
+      }
+
+      try {
+        final parsed = jsonDecode(respBody);
+        if (parsed is Map<String, dynamic>) return parsed;
+        return {'success': false, 'message': 'Invalid response format', 'raw': respBody};
+      } catch (e) {
+        return {'success': false, 'message': 'JSON parse error: $e', 'raw': respBody};
+      }
+    } catch (e) {
+      debugPrint('❌ Network error calling claim function: $e');
+      return {'success': false, 'message': 'Network error: $e'};
+    }
+  }
 
   Future<void> _handleQRCode(String code) async {
     if (_isProcessing) return;
     setState(() => _isProcessing = true);
 
     try {
+      // Stop scanner while processing
+      try {
+        _controller.stop();
+      } catch (_) {}
+
       final auth = FirebaseAuth.instance;
       final currentUser = auth.currentUser;
+      debugPrint('🔑 currentUser uid = ${currentUser?.uid}');
 
       debugPrint("📦 Raw scanned QR: $code");
 
-      // ✅ Parse JSON or fallback to plain deviceId
+      // Parse JSON or fallback to plain deviceId
       String deviceId;
       try {
         final parsed = jsonDecode(code);
@@ -45,38 +82,56 @@ class _QRScanPageState extends State<QRScanPage> {
 
       debugPrint("✅ Parsed Device ID: $deviceId");
 
+      // Debounce repeated scans
+      final now = DateTime.now();
+      final last = _recentScans[deviceId];
+      if (last != null && now.difference(last) < const Duration(seconds: 5)) {
+        debugPrint('Ignored duplicate scan for $deviceId (debounced)');
+        return;
+      }
+      _recentScans[deviceId] = now;
+
       if (currentUser == null) {
-        // 🔐 Redirect to signup if not logged in
+        // Not signed in — go to signup (pass normalized ID)
         Navigator.pushReplacement(
           context,
           MaterialPageRoute(
-            builder: (_) => TsuperheroSignupPage(scannedId: deviceId),
+            builder: (_) => SignupTsuperhero(deviceId: deviceId.toLowerCase()),
           ),
         );
         return;
       }
 
-      // ✅ Send claim request
       final uid = currentUser.uid;
-      final response = await http.post(
-        Uri.parse(functionUrl),
-        headers: {'Content-Type': 'application/json'},
-        body: jsonEncode({'deviceId': deviceId, 'uid': uid}),
-      );
+      final normalizedDeviceId = deviceId.toLowerCase();
 
-      final result = jsonDecode(response.body);
+      // Call backend function
+      final result = await _callClaimFunction(normalizedDeviceId, uid);
       debugPrint("🌐 Function response: $result");
 
-      if (response.statusCode == 200 && result['success'] == true) {
-        // ✅ Update Firestore user data
-        await FirebaseFirestore.instance.collection('users').doc(uid).set({
+      if (result['success'] == true) {
+        // SECURITY CHECK: ensure Firestore user doc exists
+        final userDocRef = FirebaseFirestore.instance.collection('users').doc(uid);
+        final userDoc = await userDocRef.get();
+
+        if (!userDoc.exists) {
+          SnackbarService.show(context,
+              'Account record missing. Please sign up again or contact support.');
+          try {
+            await FirebaseAuth.instance.signOut();
+          } catch (_) {}
+          return;
+        }
+
+        // Update Firestore user merge
+        await userDocRef.set({
           'role': 'tsuperhero',
-          'boxClaimed': deviceId,
+          'boxClaimed': normalizedDeviceId,
         }, SetOptions(merge: true));
 
-        SnackbarService.show(context, result['message'] ?? 'Claimed $deviceId successfully!');
+        SnackbarService.show(context, result['message'] ?? 'Claimed $normalizedDeviceId successfully!');
 
-        // ✅ Redirect to dashboard
+        // Redirect to dashboard
         Navigator.pushReplacement(
           context,
           MaterialPageRoute(builder: (_) => const RoleRouter()),
@@ -85,10 +140,13 @@ class _QRScanPageState extends State<QRScanPage> {
         SnackbarService.show(context, '❌ Failed: ${result['message'] ?? 'Unknown error'}');
       }
     } catch (e) {
-      debugPrint("⚠️ Error: $e");
+      debugPrint("⚠️ Error in QR handler: $e");
       SnackbarService.show(context, 'Error: $e');
     } finally {
       setState(() => _isProcessing = false);
+      try {
+        _controller.start();
+      } catch (_) {}
     }
   }
 

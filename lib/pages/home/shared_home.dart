@@ -11,7 +11,6 @@ import 'package:para2/pages/settings/profile_settings.dart';
 import 'package:para2/theme/app_icons.dart';
 import 'package:para2/services/location_service.dart';
 import 'package:para2/pages/settings/PHdashboard.dart';
-import 'package:provider/provider.dart';
 // map theme applied via MapControllerService when controller is set
 import 'package:para2/services/map_controller_service.dart';
 import 'package:para2/services/button_actions.dart';
@@ -23,6 +22,8 @@ class SharedHome extends StatefulWidget {
   final String roleLabel;
   final VoidCallback onSignOut;
   final List<Widget> roleMenu;
+  final List<Widget> roleActions;
+
   final Widget Function(
       BuildContext context,
       String displayName,
@@ -37,8 +38,9 @@ class SharedHome extends StatefulWidget {
     required this.roleLabel,
     required this.onSignOut,
     required this.roleMenu,
+    required this.roleActions,
     required this.roleContentBuilder,
-    this.onMapTap,
+    this.onMapTap, 
   });
 
   static _SharedHomeState? of(BuildContext context) =>
@@ -66,6 +68,11 @@ class _SharedHomeState extends State<SharedHome> with TickerProviderStateMixin {
   bool _isPanelOpen = false;
   late final AnimationController _panelController;
   late final Animation<Offset> _panelOffset;
+
+  // Bottom panel (PARA!) state + animation
+  bool _isBottomPanelOpen = false;
+  late final AnimationController _bottomPanelController;
+  late final Animation<Offset> _bottomPanelOffset;
 
   String _displayName = 'User';
   bool _isProfileIncomplete = false;
@@ -103,6 +110,15 @@ class _SharedHomeState extends State<SharedHome> with TickerProviderStateMixin {
         Tween<Offset>(begin: const Offset(-1.0, 0.0), end: Offset.zero).animate(
           CurvedAnimation(parent: _panelController, curve: Curves.easeInOut),
         );
+
+    // Bottom panel slides vertically from bottom -> up
+    _bottomPanelController = AnimationController(
+      vsync: this,
+      duration: const Duration(milliseconds: 300),
+    );
+    _bottomPanelOffset = Tween<Offset>(begin: const Offset(0.0, 1.0), end: Offset.zero).animate(
+      CurvedAnimation(parent: _bottomPanelController, curve: Curves.easeInOut),
+    );
 
     _loadCustomMarkers();
     // Try to set an initial camera from a cached "last known" location
@@ -492,11 +508,25 @@ class _SharedHomeState extends State<SharedHome> with TickerProviderStateMixin {
       _isPanelOpen ? _panelController.forward() : _panelController.reverse();
     });
   }
+  void _toggleBottomPanel() {
+    setState(() {
+      _isBottomPanelOpen = !_isBottomPanelOpen;
+      _isBottomPanelOpen ? _bottomPanelController.forward() : _bottomPanelController.reverse();
+    });
+  }
+  
+
+  // Public wrapper so descendant widgets can toggle the bottom panel.
+  // Use: `SharedHome.of(context)?.toggleBottomPanel();`
+  void toggleBottomPanel() => _toggleBottomPanel();
 
   @override
   void dispose() {
     _devicesSub?.cancel();
     _panelController.dispose();
+    try {
+      _bottomPanelController.dispose();
+    } catch (_) {}
     // Dispose any active marker animation controllers
     for (final c in _markerAnimControllers.values) {
       try {
@@ -818,7 +848,7 @@ class _SharedHomeState extends State<SharedHome> with TickerProviderStateMixin {
                   GestureDetector(
                     onTap: _togglePanel,
                     child: Container(
-                      padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 3),
+                      padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 5),
                       decoration: BoxDecoration(
                         color: const Color.fromARGB(255, 16, 16, 36),
                         borderRadius: BorderRadius.circular(8),
@@ -867,11 +897,11 @@ class _SharedHomeState extends State<SharedHome> with TickerProviderStateMixin {
 
                   const Spacer(),
                   Text(
-                    "PARA!",
+                    "PARA!  ",
                     style: TextStyle(
                       fontStyle: FontStyle.italic,
                       fontWeight: FontWeight.bold,
-                      fontSize: 18,
+                      fontSize: 15,
                       color: const Color.fromARGB(150, 255, 255, 255),
                       shadows: [Shadow(color: Colors.black.withOpacity(1.0), blurRadius: 20)],
                     ),
@@ -890,57 +920,130 @@ class _SharedHomeState extends State<SharedHome> with TickerProviderStateMixin {
           child: Column(
             children: [
               FloatingActionButton(
+                shape: CircleBorder(),
                 mini: true,
                 backgroundColor: const Color.fromARGB(255, 193, 212, 16),
                 onPressed: _showCoinsDialog,
-                child: const Icon(Icons.monetization_on, color: Color.fromARGB(255, 28, 23, 46), size: 20),
-              ),
-              const SizedBox(height: 8),
-              FloatingActionButton(
-                mini: true,
-                backgroundColor: const Color.fromARGB(255, 28, 23, 46),
-                onPressed: _centerOnUser,
-                child: const Icon(Icons.my_location, color: Color.fromARGB(255, 124, 155, 53), size: 20),
-              ),
-              const SizedBox(height: 8),
-              // Theme toggle
-              FloatingActionButton(
-                mini: true,
-                backgroundColor: const Color.fromARGB(255, 28, 23, 46),
-                onPressed: () => ButtonActions.toggleMapTheme(context, null),
-                child: const Icon(Icons.brightness_6, color:Color.fromARGB(255, 124, 155, 53), size: 20),
+                child: const Icon(Icons.monetization_on, color: Color.fromARGB(255, 28, 23, 46), size: 25),
               ),
               const SizedBox(height: 8),
               // Follow toggle
-              ValueListenableBuilder<bool>(
-                valueListenable: FollowService.instance.isFollowing,
-                builder: (context, following, _) {
-                  return FloatingActionButton(
-                    mini: true,
-                    backgroundColor: const Color.fromARGB(255, 28, 23, 46),
-                    onPressed: () => ButtonActions.toggleFollowMode(context),
-                    child: Icon(
-                      following ? Icons.gps_fixed : Icons.gps_not_fixed,
-                      color: Color.fromARGB(255, 124, 155, 53),
-                      size: 20,
-                    ),
-                  );
-                },
+              GestureDetector(
+                onLongPress: () => _centerOnUser(),
+                child: ValueListenableBuilder<bool>(
+                  valueListenable: FollowService.instance.isFollowing,
+                  builder: (context, following, _) {
+                    return FloatingActionButton(
+                      mini: true,
+                      backgroundColor: const Color.fromARGB(255, 28, 27, 34),
+                      onPressed: () => ButtonActions.toggleFollowMode(context),
+                      child: Icon(
+                        following ? Icons.gps_fixed : Icons.gps_not_fixed,
+                        color: Color.fromARGB(255, 115, 47, 204),
+                        size: 20,
+                      ),
+                    );
+                  },
+                ),
               ),
             ],
           ),
         ),
 
         // Bottom content
+
+        // PARA! toggle button (centered above bottom content)
         Positioned(
-          bottom: 0,
+          bottom: 80,
           left: 0,
           right: 0,
-          child: widget.roleContentBuilder(
-            context,
-            _displayName,
-            _currentUserLoc,
-            widget.onMapTap ?? (_) {},
+          child: Center(
+            child: ElevatedButton(
+              onPressed: _toggleBottomPanel,
+              style: ElevatedButton.styleFrom(
+                backgroundColor: const Color.fromARGB(255, 160, 0, 200),
+                foregroundColor: Colors.white,
+                elevation: 6,
+                padding: const EdgeInsets.symmetric(horizontal: 28, vertical: 12),
+                shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(24)),
+              ),
+              child: const Text('PARA!', style: TextStyle(fontWeight: FontWeight.bold, fontSize: 16)),
+            ),
+          ),
+        ),
+
+
+        // Bottom slide-up panel
+        Align(
+          alignment: Alignment.bottomCenter,
+          child: SlideTransition(
+            position: _bottomPanelOffset,
+            child: SafeArea(
+              top: false,
+              child: Container(
+                width: double.infinity,
+                height: 350,
+                padding: const EdgeInsets.all(16),
+                decoration: BoxDecoration(
+                  color: const Color.fromARGB(255, 39, 38, 38),
+                  borderRadius: BorderRadius.only(topLeft: Radius.circular(24), topRight: Radius.circular(24)),
+                  boxShadow: [BoxShadow(color: Colors.black26, blurRadius: 12)],
+                ),
+                child: Column(
+                  children: [
+                    Container(
+                      width: 48,
+                      height: 6,
+                      decoration: BoxDecoration(
+                        color: const Color.fromARGB(255, 255, 255, 255),
+                        borderRadius: BorderRadius.circular(4),
+                      ),
+                    ),
+                    Expanded(
+                        child: Column(
+                          crossAxisAlignment: CrossAxisAlignment.start,
+                          children: [
+                            Row(
+                              children: [
+                                Text(widget.roleLabel == 'TSUPERHERO'
+                                    ? 'Commuters On Your Route'
+                                    : 'Jeeps On Your Route',
+                                  style: TextStyle(
+                                  height: 1,
+                                  fontSize: 12,
+                                  fontWeight: FontWeight.bold,
+                                  color: Colors.white
+                                ),),
+                                
+                                Spacer(),
+                                
+                                GestureDetector(
+                                  onTap: toggleBottomPanel,
+                                  child: Container(
+                                    padding: EdgeInsets.all(2),
+                                    decoration: BoxDecoration(
+                                      color: const Color.fromARGB(255, 218, 87, 87),
+                                      borderRadius: BorderRadius.circular(20),
+                                      ),
+                                    child: Icon(Icons.close, size: 14,color: const Color.fromARGB(255, 39, 38, 38),
+                                    weight: 500,
+                                    ),
+                                  ),
+                                ),
+                                
+                                const SizedBox(width: 8),
+                              ],
+                            ),
+                            // Reuse role menu items inside bottom panel
+                            ...widget.roleActions,
+                          ],
+                        ),
+                      
+                    ),
+                  ],
+                ),
+              ),
+            ),
           ),
         ),
 
@@ -1084,8 +1187,10 @@ class _SharedHomeState extends State<SharedHome> with TickerProviderStateMixin {
                           children: [
                             Text(
                               _displayName,
-                              style: const TextStyle(
-                                fontWeight: FontWeight.bold,
+                              style: TextStyle(
+                                height: 1,
+                                fontFamily: GoogleFonts.roboto().fontFamily,
+                                fontWeight: FontWeight.w900,
                                 fontSize: 16,
                                 color: Colors.white
                               ),
@@ -1094,8 +1199,17 @@ class _SharedHomeState extends State<SharedHome> with TickerProviderStateMixin {
                             Text(
                               widget.roleLabel,
                               style: const TextStyle(
+                                height: 1,
                                 color: Color.fromARGB(255, 255, 255, 255),
                                 fontSize: 11,
+                            ),
+                          ),
+                          Text(
+                              'PROFILE •••',
+                              style: const TextStyle(
+                                height: 2,
+                                color: Color.fromARGB(255, 172, 172, 172),
+                                fontSize: 8.5,
                             ),
                           ),
                         ],

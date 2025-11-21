@@ -4,9 +4,7 @@ import 'package:flutter/material.dart';
 import 'package:firebase_auth/firebase_auth.dart';
 import 'package:cloud_firestore/cloud_firestore.dart';
 import 'package:para2/pages/home/role_router.dart';
-import 'package:para2/pages/login/tsuperhero_signup_page.dart';
 import 'package:para2/services/auth_service.dart';
-import 'package:para2/pages/home/shared_home.dart';
 import 'package:para2/pages/login/login.dart';
 
 class SignupStep2 extends StatefulWidget {
@@ -14,6 +12,7 @@ class SignupStep2 extends StatefulWidget {
   final String lastName;
   final String userName;
   final DateTime dob;
+  final String role;
 
   const SignupStep2({
     super.key,
@@ -21,6 +20,7 @@ class SignupStep2 extends StatefulWidget {
     required this.lastName,
     required this.userName,
     required this.dob,
+    this.role = 'pasahero',
   });
 
   @override
@@ -149,7 +149,7 @@ class _SignupStep2State extends State<SignupStep2>
 
       final user = userCredential.user!;
       await _firestore.collection('users').doc(user.uid).set({
-        'role': widget is TsuperheroSignupPage ? 'tsuperhero' : 'pasahero',
+        'role': widget.role,
         'contact': contact,
         'email': email,
         'userName': widget.userName,

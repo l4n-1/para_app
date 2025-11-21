@@ -51,6 +51,7 @@ class _SignupPageState extends State<SignupPage> {
           lastName: _lastNameController.text.trim(),
           userName: _userNameController.text.trim(),
           dob: _selectedDOB!,
+          role: 'pasahero',
         ),
       ),
     );
