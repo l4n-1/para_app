@@ -11,12 +11,15 @@ import 'package:para2/pages/settings/profile_settings.dart';
 import 'package:para2/theme/app_icons.dart';
 import 'package:para2/services/location_service.dart';
 import 'package:para2/pages/settings/PHdashboard.dart';
+import 'package:para2/pages/settings/THdashboard.dart';
 // map theme applied via MapControllerService when controller is set
 import 'package:para2/services/map_controller_service.dart';
 import 'package:para2/services/button_actions.dart';
 import 'package:para2/services/follow_service.dart';
 import 'package:para2/services/snackbar_service.dart';
 import 'package:para2/services/location_broadcast.dart';
+import 'dart:math' as math;
+import 'package:para2/services/ui_utils.dart';
 
 class SharedHome extends StatefulWidget {
   final String roleLabel;
@@ -59,6 +62,7 @@ class _SharedHomeState extends State<SharedHome> with TickerProviderStateMixin {
   final Map<PolylineId, Polyline> _polylines = {};
 
   StreamSubscription? _devicesSub;
+  StreamSubscription<LatLng>? _locationBroadcastSub;
 
   bool _isMapReady = false;
   bool _hasCenteredOnUser = false;
@@ -74,7 +78,6 @@ class _SharedHomeState extends State<SharedHome> with TickerProviderStateMixin {
   late final AnimationController _bottomPanelController;
   late final Animation<Offset> _bottomPanelOffset;
 
-  String _pasaDest = '';
   String _displayName = 'User';
   bool _isProfileIncomplete = false;
   bool _featuresLocked = false;
@@ -90,6 +93,12 @@ class _SharedHomeState extends State<SharedHome> with TickerProviderStateMixin {
 
   // User coins
   double _userCoins = 0.0;
+
+  // PARA! button animation state
+  double _paraScale = 1.0;
+  bool _paraPressed = false;
+  final Color _paraBaseColor = const Color.fromARGB(255, 160, 0, 200);
+  final Color _paraActiveColor = const Color.fromARGB(255, 210, 30, 240);
 
   // default initial camera (used until we resolve a last-known location)
   CameraPosition _initialCamera = const CameraPosition(
@@ -128,11 +137,11 @@ class _SharedHomeState extends State<SharedHome> with TickerProviderStateMixin {
     _checkProfileCompletion();
     _loadUserDisplayName();
     _loadUserCoins();
-    _fireDest();
-
+ 
     // Subscribe to app-wide location broadcasts so this SharedHome instance
     // receives live location updates even if callers can't find the ancestor.
-    LocationBroadcast.instance.stream.listen((loc) {
+    _locationBroadcastSub = LocationBroadcast.instance.stream.listen((loc) {
+      if (!mounted) return;
       debugPrint('LocationBroadcast -> SharedHome: $loc');
       updateUserLocation(loc);
     }, onError: (e) {
@@ -158,6 +167,37 @@ class _SharedHomeState extends State<SharedHome> with TickerProviderStateMixin {
       debugPrint('Error getting last known location: $e');
     }
   }
+
+    // Open dashboard based on user's role (pasahero -> PHDashboard, tsuperhero -> THDashboard)
+    Future<void> _openRoleDashboard() async {
+      final user = FirebaseAuth.instance.currentUser;
+      if (user == null) return;
+
+      try {
+        final doc = await FirebaseFirestore.instance.collection('users').doc(user.uid).get();
+        final role = (doc.data()?['role'] ?? 'pasahero').toString().toLowerCase();
+        if (!mounted) return;
+
+        if (role == 'tsuperhero' || role == 'th' || role == 'driver') {
+          Navigator.push(
+            context,
+            MaterialPageRoute(builder: (_) => THDashboard(displayName: _displayName)),
+          );
+        } else {
+          Navigator.push(
+            context,
+            MaterialPageRoute(builder: (_) => PHDashboard(displayName: _displayName)),
+          );
+        }
+      } catch (e) {
+        debugPrint('Error opening dashboard: $e');
+        if (!mounted) return;
+        Navigator.push(
+          context,
+          MaterialPageRoute(builder: (_) => PHDashboard(displayName: _displayName)),
+        );
+      }
+    }
 
   Future<void> _loadCustomMarkers() async {
     try {
@@ -211,29 +251,7 @@ class _SharedHomeState extends State<SharedHome> with TickerProviderStateMixin {
     }
   }
 
-  Future<void> _fireDest() async {
-    final user = FirebaseAuth.instance.currentUser;
-    if (user == null) return;
 
-    try {
-      final doc = await FirebaseFirestore.instance.collection('para_requests').doc(user.uid).get();
-      if (doc.exists) {
-        final data = doc.data()!;
-        final dest = data['destination']?.toString() ?? '';
-
-        if (dest.isNotEmpty) {
-          SnackbarService.show(context, 'Your current destination is: $dest', duration: const Duration(seconds: 3));
-        } else {
-          SnackbarService.show(context, 'No destination set. Please set your destination in profile settings.', duration: const Duration(seconds: 3));
-        }
-        setState(() {
-          _pasaDest = dest;
-        });
-      }
-    } catch (e) {
-      debugPrint('Error fetching destination: $e');
-    }
-  }
   // ✅ ADD: Load user coins from Firestore
   Future<void> _loadUserCoins() async {
     final user = FirebaseAuth.instance.currentUser;
@@ -339,6 +357,7 @@ class _SharedHomeState extends State<SharedHome> with TickerProviderStateMixin {
 
   // ✅ FIXED: Enhanced location update with custom user marker
   Future<void> updateUserLocation(LatLng userLoc) async {
+    if (!mounted) return;
     if (userLoc.latitude == 0.0 && userLoc.longitude == 0.0) {
       debugPrint("⚠️ Invalid location (0,0) - skipping");
       return;
@@ -548,6 +567,7 @@ class _SharedHomeState extends State<SharedHome> with TickerProviderStateMixin {
   @override
   void dispose() {
     _devicesSub?.cancel();
+    _locationBroadcastSub?.cancel();
     _panelController.dispose();
     try {
       _bottomPanelController.dispose();
@@ -561,6 +581,29 @@ class _SharedHomeState extends State<SharedHome> with TickerProviderStateMixin {
     }
     _markerAnimControllers.clear();
     super.dispose();
+  }
+
+  // Helper to animate PARA! press and trigger action
+  Future<void> _triggerPara({bool longPress = false}) async {
+    setState(() {
+      _paraPressed = true;
+      _paraScale = longPress ? 1.12 : 1.08;
+    });
+
+    try {
+      // perform the toggle action
+      _toggleBottomPanel();
+    } catch (_) {}
+
+    // keep the pressed visual briefly
+    await Future.delayed(const Duration(milliseconds: 180));
+
+    if (mounted) {
+      setState(() {
+        _paraScale = 1.0;
+        _paraPressed = false;
+      });
+    }
   }
 
   Future<void> centerMap(LatLng pos) async {
@@ -772,7 +815,10 @@ class _SharedHomeState extends State<SharedHome> with TickerProviderStateMixin {
 
   @override
   Widget build(BuildContext context) {
-    final panelWidth = MediaQuery.of(context).size.width * 0.7;
+    // Responsive side panel width (clamp to sensible min/max values)
+    final panelWidth = UIUtils.responsiveWidthClamp(context, 0.7, minPx: 240.0, maxPx: 420.0);
+    // Responsive bottom panel height (proportional but capped)
+    final bottomPanelHeight = math.min(UIUtils.screenHeight(context) * 0.55, 380.0);
     
     return Scaffold(
   body: SizedBox.expand( // <-- forces Stack to fill entire screen
@@ -983,16 +1029,48 @@ class _SharedHomeState extends State<SharedHome> with TickerProviderStateMixin {
           left: 0,
           right: 0,
           child: Center(
-            child: ElevatedButton(
-              onPressed: _toggleBottomPanel,
-              style: ElevatedButton.styleFrom(
-                backgroundColor: const Color.fromARGB(255, 160, 0, 200),
-                foregroundColor: Colors.white,
-                elevation: 6,
-                padding: const EdgeInsets.symmetric(horizontal: 28, vertical: 12),
-                shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(24)),
+            child: GestureDetector(
+              behavior: HitTestBehavior.opaque,
+              onTapDown: (_) {
+                setState(() {
+                  _paraScale = 1.08;
+                  _paraPressed = true;
+                });
+              },
+              onTapUp: (_) async {
+                // trigger action and animate back
+                _triggerPara(longPress: false);
+              },
+              onTapCancel: () {
+                setState(() {
+                  _paraScale = 1.0;
+                  _paraPressed = false;
+                });
+              },
+              onLongPress: () async {
+                _triggerPara(longPress: true);
+              },
+              child: AnimatedScale(
+                scale: _paraScale,
+                duration: const Duration(milliseconds: 120),
+                curve: Curves.easeOutBack,
+                child: AnimatedContainer(
+                  duration: const Duration(milliseconds: 120),
+                  padding: const EdgeInsets.symmetric(horizontal: 28, vertical: 12),
+                  decoration: BoxDecoration(
+                    color: _paraPressed ? _paraActiveColor : _paraBaseColor,
+                    borderRadius: BorderRadius.circular(24),
+                    boxShadow: [
+                      BoxShadow(
+                        color: (_paraPressed ? _paraActiveColor : _paraBaseColor).withOpacity(0.45),
+                        blurRadius: _paraPressed ? 18 : 8,
+                        offset: const Offset(0, 6),
+                      ),
+                    ],
+                  ),
+                  child: const Text('PARA!', style: TextStyle(fontWeight: FontWeight.bold, fontSize: 16, color: Colors.white)),
+                ),
               ),
-              child: const Text('PARA!', style: TextStyle(fontWeight: FontWeight.bold, fontSize: 16)),
             ),
           ),
         ),
@@ -1007,7 +1085,7 @@ class _SharedHomeState extends State<SharedHome> with TickerProviderStateMixin {
               top: false,
               child: Container(
                 width: double.infinity,
-                height: 350,
+                height: bottomPanelHeight,
                 padding: const EdgeInsets.all(16),
                 decoration: BoxDecoration(
                   color: const Color.fromARGB(255, 39, 38, 38),
@@ -1061,7 +1139,6 @@ class _SharedHomeState extends State<SharedHome> with TickerProviderStateMixin {
                             ),
                             // Reuse role menu items inside bottom panel
                             ...widget.roleActions,
-                            _buildDestDisplay(),
                           ],
                         ),
                       
@@ -1131,14 +1208,7 @@ class _SharedHomeState extends State<SharedHome> with TickerProviderStateMixin {
           child: Column(
             children: [
               GestureDetector(
-                onTap: () {
-                  Navigator.push(
-                    context,
-                    MaterialPageRoute(
-                      builder: (_) => PHDashboard(displayName: _displayName),
-                    ),
-                  );
-                },
+                onTap: () => _openRoleDashboard(),
                 child: Container(
                   decoration: BoxDecoration(
                     gradient: LinearGradient(
@@ -1319,61 +1389,7 @@ class _SharedHomeState extends State<SharedHome> with TickerProviderStateMixin {
   }
 
   // ignore: strict_top_level_inference
-  _buildDestDisplay() {
-    return
-      Column(
-        children: [
-          Container(
-            alignment: Alignment.centerLeft,
-            child: Text(widget.roleLabel == 'TSUPERHERO'
-                                      ? ('Your Route  ')
-                                      : ('Your Destination '),
-                    style: TextStyle(
-                      height: 2,
-                      fontSize: 12,
-                      fontWeight: FontWeight.bold,
-                      color: Colors.white
-                    ),
-                    textAlign: TextAlign.left),
-          ),
-          Container(
-            padding: const EdgeInsets.all(5),
-            decoration: BoxDecoration(
-              color: const Color.fromARGB(255, 73, 71, 85),
-              borderRadius: BorderRadius.circular(25),
-              boxShadow: [
-                BoxShadow(
-                  color: Colors.black.withOpacity(0.2),
-                  blurRadius: 6,
-                  offset: const Offset(0, 3),
-                ),
-              ],
-            ),
-            child: Row(
-              children: [
-                Image.asset('assets/USERPIN.png', height: 22),
-                Text(widget.roleLabel == 'TSUPERHERO'
-                                    ? ('not yet implemented')
-                                    : ('To  '+_pasaDest),
-                  style: TextStyle(
-                    height: 1,
-                    fontSize: 14,
-                    fontWeight: FontWeight.bold,
-                    color: Colors.white,
-                  ),
-                ),
-              ],
-          
-          
-            )
-          
-            ),
-        ],
-      );
-      
-    
-
-  }
+  
         
         
       

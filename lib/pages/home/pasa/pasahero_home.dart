@@ -3,6 +3,7 @@ import 'dart:async';
 import 'package:flutter/material.dart';
 import 'package:firebase_auth/firebase_auth.dart';
 import 'package:cloud_firestore/cloud_firestore.dart';
+import 'package:google_fonts/google_fonts.dart';
 import 'package:para2/pages/home/shared_home.dart';
 import 'package:para2/services/location_broadcast.dart';
 import 'package:para2/pages/login/login.dart';
@@ -17,8 +18,10 @@ import 'package:para2/services/RealtimeDatabaseService.dart';
 import 'package:para2/services/button_actions.dart';
 import 'package:para2/services/snackbar_service.dart';
 import 'package:para2/services/map_theme_service.dart';
+import 'package:para2/services/ui_utils.dart';
 import 'package:para2/widgets/compact_ads_button.dart';
 import 'package:para2/pages/biyahe/biyahe_logs_page.dart';
+import 'package:para2/widgets/destination_display.dart';
 
 class PasaheroHome extends StatefulWidget {
   const PasaheroHome({super.key});
@@ -52,6 +55,16 @@ class _PasaheroHomeState extends State<PasaheroHome> with WidgetsBindingObserver
   // Route matching variables
   final double _routeMatchingThreshold = 2.0;
 
+  // PASAHERO PARA! button animation state
+  double _paraScalePasahero = 1.0;
+  bool _paraPressedPasahero = false;
+  // Original gradient colors
+  final Color _paraGradientStartPasahero = const Color.fromARGB(255, 60, 14, 97);
+  final Color _paraGradientEndPasahero = const Color.fromARGB(255, 24, 64, 150);
+  // Brighter variants used when pressed
+  final Color _paraGradientStartActivePasahero = const Color.fromARGB(255, 85, 14, 218);
+  final Color _paraGradientEndActivePasahero = const Color.fromARGB(255, 4, 35, 77);
+
   
 
   @override
@@ -72,6 +85,29 @@ class _PasaheroHomeState extends State<PasaheroHome> with WidgetsBindingObserver
       _rtdbStream = null;
     });
     super.dispose();
+  }
+
+  // Helper to animate PASAHERO PARA! press and trigger action
+  Future<void> _triggerPasaheroPara({bool longPress = false}) async {
+    setState(() {
+      _paraPressedPasahero = true;
+      _paraScalePasahero = longPress ? 1.12 : 1.08;
+    });
+
+    try {
+      if (!longPress) {
+        await _sendParaSignal();
+      }
+    } catch (_) {}
+
+    await Future.delayed(const Duration(milliseconds: 180));
+
+    if (mounted) {
+      setState(() {
+        _paraScalePasahero = 1.0;
+        _paraPressedPasahero = false;
+      });
+    }
   }
 
   @override
@@ -470,93 +506,141 @@ class _PasaheroHomeState extends State<PasaheroHome> with WidgetsBindingObserver
 
   // ✅ Enhanced jeepney suggestion list with route matching and capacity info
   Widget _buildJeepneySuggestionList({bool compact = false}) {
-    if (!_hasSetDestination) return const SizedBox.shrink();
+    // Always render the suggestion area. If destination is set we show
+    // only jeepneys on-route; otherwise show nearby available jeepneys.
+    final availableJeepneys = _jeepneys.entries.where((entry) {
+      final v = entry.value;
+      final online = v['isOnline'] == true;
+      final hasSeats = v['hasAvailableSeats'] == true;
+      if (!online || !hasSeats) return false;
+      if (_hasSetDestination) {
+        return _isJeepneyOnRoute(entry.key);
+      }
+      // No destination placed: show all online jeepneys with seats
+      return true;
+    }).toList();
 
-    // Filter online jeepneys with available seats AND on route
-    final availableJeepneys = _jeepneys.entries.where((entry) =>
-      entry.value['isOnline'] == true &&
-        entry.value['hasAvailableSeats'] == true &&
-        _isJeepneyOnRoute(entry.key)
-    ).toList();
+    final showNoAvailableOnRoute = _hasSetDestination && availableJeepneys.isEmpty;
+
+    Widget _buildPlaceholderCard({double width = 160}) {
+      return Container(
+        width: width,
+        margin: const EdgeInsets.only(right: 8),
+        padding: const EdgeInsets.all(10),
+        decoration: BoxDecoration(
+          color: Colors.white.withOpacity(0.04),
+          borderRadius: BorderRadius.circular(10),
+        ),
+        child: Column(
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: const [
+            SizedBox(height: 8),
+            Text('Jeepney', style: TextStyle(color: Colors.white, fontWeight: FontWeight.bold)),
+            SizedBox(height: 6),
+            Text('Calculating', style: TextStyle(color: Colors.white70, fontSize: 12)),
+            SizedBox(height: 6),
+            Text('– seats', style: TextStyle(color: Colors.greenAccent, fontSize: 12)),
+          ],
+        ),
+      );
+    }
+
+    // Compute responsive sizes using shared helpers
+    final screenWidth = UIUtils.screenWidth(context);
+    final cardWidthCompact = UIUtils.responsiveCardWidth(context, fraction: 0.45, maxPx: 180.0);
+    final cardWidthFull = UIUtils.responsiveCardWidth(context, fraction: 0.6, maxPx: 220.0);
 
     // When compact is true we render a condensed widget suitable for a row
     if (compact) {
-      if (availableJeepneys.isEmpty) {
+      // Render up to 2 items (or placeholders) in compact mode. If there are
+      // no jeepneys on route we still show faded placeholders with an overlay
+      // message.
+      final items = <Widget>[];
+          if (availableJeepneys.isNotEmpty) {
+        for (final entry in availableJeepneys.take(2)) {
+          final id = entry.key;
+          final data = entry.value;
+          LatLng jeepPos = LatLng(data['lat'], data['lng']);
+          double? eta;
+          if (_userLoc != null) {
+            eta = _computeETA(jeepPos, _userLoc!, data['speed'] ?? 20);
+          }
+
+          final currentPassengers = data['currentPassengers'] ?? 0;
+          final maxCapacity = data['maxCapacity'] ?? 20;
+          final availableSeats = maxCapacity - currentPassengers;
+
+          items.add(GestureDetector(
+            onTap: () {
+              setState(() {
+                _selectedJeepId = id;
+                _hasSelectedJeep = true;
+                _updatePolyline();
+              });
+              SnackbarService.show(context, '✅ Selected Jeepney $id ($availableSeats seats available)', duration: const Duration(seconds: 1));
+            },
+            child: Container(
+              width: cardWidthCompact,
+              margin: const EdgeInsets.only(right: 8),
+              padding: const EdgeInsets.all(8),
+              decoration: BoxDecoration(
+                color: Colors.white.withOpacity(0.06),
+                borderRadius: BorderRadius.circular(10),
+              ),
+              child: Column(
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: [
+                  Text('Jeep $id', style: const TextStyle(color: Colors.white, fontWeight: FontWeight.bold, fontSize: 13)),
+                  const SizedBox(height: 6),
+                  Text(eta != null && eta != double.infinity ? '${eta.toStringAsFixed(1)} min' : 'Calculating', style: const TextStyle(color: Colors.white70, fontSize: 12)),
+                  const SizedBox(height: 6),
+                  Text('$availableSeats seats', style: const TextStyle(color: Colors.greenAccent, fontSize: 12)),
+                ],
+              ),
+            ),
+          ));
+        }
+      } else {
+        // placeholders (use responsive widths)
+        items.addAll([_buildPlaceholderCard(width: cardWidthCompact), _buildPlaceholderCard(width: cardWidthCompact * 0.9)]);
+      }
+
+      final content = SingleChildScrollView(
+        scrollDirection: Axis.horizontal,
+        child: Row(children: items),
+      );
+
+      if (showNoAvailableOnRoute) {
         return SizedBox(
-          width: 180,
-          child: Container(
-            padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 6),
-            decoration: BoxDecoration(
-              color: Colors.transparent,
-              borderRadius: BorderRadius.circular(8),
-            ),
-            child: const Text(
-              'No jeepneys on your route',
-              maxLines: 2,
-              overflow: TextOverflow.ellipsis,
-              textAlign: TextAlign.center,
-              style: TextStyle(color: Colors.white, fontSize: 12),
-            ),
+          width: screenWidth,
+          child: Stack(
+            alignment: Alignment.center,
+            children: [
+              Opacity(opacity: 0.35, child: content),
+              Padding(
+                padding: const EdgeInsets.symmetric(horizontal: 16.0),
+                child: SizedBox(
+                  width: screenWidth - 32,
+                  child: const Text(
+                    'No available jeepneys with seats on your route nearby.',
+                    maxLines: 2,
+                    textAlign: TextAlign.center,
+                    style: TextStyle(color: Colors.white, fontSize: 12),
+                  ),
+                ),
+              ),
+            ],
           ),
         );
       }
 
-      // Show up to 2 items in compact mode to fit in a row
-      final items = availableJeepneys.take(2).map((entry) {
-        final id = entry.key;
-        final data = entry.value;
-        LatLng jeepPos = LatLng(data['lat'], data['lng']);
-        double? eta;
-        if (_userLoc != null) {
-          eta = _computeETA(jeepPos, _userLoc!, data['speed'] ?? 20);
-        }
-
-        final currentPassengers = data['currentPassengers'] ?? 0;
-        final maxCapacity = data['maxCapacity'] ?? 20;
-        final availableSeats = maxCapacity - currentPassengers;
-
-        return GestureDetector(
-          onTap: () {
-            setState(() {
-              _selectedJeepId = id;
-              _hasSelectedJeep = true;
-              _updatePolyline();
-            });
-            SnackbarService.show(context, '✅ Selected Jeepney $id ($availableSeats seats available)', duration: const Duration(seconds: 1));
-          },
-          child: Container(
-            width: 180,
-            margin: const EdgeInsets.only(right: 8),
-            padding: const EdgeInsets.all(8),
-            decoration: BoxDecoration(
-              color: Colors.white.withOpacity(0.06),
-              borderRadius: BorderRadius.circular(10),
-            ),
-            child: Column(
-              crossAxisAlignment: CrossAxisAlignment.start,
-              children: [
-                Text('Jeep $id', style: const TextStyle(color: Colors.white, fontWeight: FontWeight.bold, fontSize: 13)),
-                const SizedBox(height: 6),
-                Text(eta != null && eta != double.infinity ? '${eta.toStringAsFixed(1)} min' : 'Calculating', style: const TextStyle(color: Colors.white70, fontSize: 12)),
-                const SizedBox(height: 6),
-                Text('$availableSeats seats', style: const TextStyle(color: Colors.greenAccent, fontSize: 12)),
-              ],
-            ),
-          ),
-        );
-      }).toList();
-
-      return Row(children: items);
+      return content;
     }
 
-    // Default (full) layout
-    if (availableJeepneys.isEmpty) {
-      return _buildInfoCard("No available jeepneys with seats on your route nearby.");
-    }
-
-    return Container(
+    // Default (full) layout - show full list or faded placeholders with overlay
+    final container = Container(
       margin: const EdgeInsets.all(16),
-      padding: const EdgeInsets.symmetric(vertical: 8),
+      padding: const EdgeInsets.symmetric(vertical: 8, horizontal: 12),
       decoration: BoxDecoration(
         color: Colors.white,
         borderRadius: BorderRadius.circular(16),
@@ -564,78 +648,90 @@ class _PasaheroHomeState extends State<PasaheroHome> with WidgetsBindingObserver
       ),
       child: Column(
         mainAxisSize: MainAxisSize.min,
+        crossAxisAlignment: CrossAxisAlignment.start,
         children: [
           const Text(
-            "Available Jeepneys (On Your Route)",
+            "Jeeps On Your Route",
             style: TextStyle(fontWeight: FontWeight.bold, fontSize: 16),
           ),
           const SizedBox(height: 8),
-          ...availableJeepneys.map((entry) {
-            final id = entry.key;
-            final data = entry.value;
-            LatLng jeepPos = LatLng(data['lat'], data['lng']);
-            double? eta;
-            if (_userLoc != null) {
-              eta = _computeETA(jeepPos, _userLoc!, data['speed'] ?? 20);
-            }
+          SizedBox(
+            height: 110,
+            child: ListView(
+              scrollDirection: Axis.horizontal,
+              children: availableJeepneys.isNotEmpty
+                  ? availableJeepneys.map((entry) {
+                      final id = entry.key;
+                      final data = entry.value;
+                      LatLng jeepPos = LatLng(data['lat'], data['lng']);
+                      double? eta;
+                      if (_userLoc != null) {
+                        eta = _computeETA(jeepPos, _userLoc!, data['speed'] ?? 20);
+                      }
 
-            final currentPassengers = data['currentPassengers'] ?? 0;
-            final maxCapacity = data['maxCapacity'] ?? 20;
-            final availableSeats = maxCapacity - currentPassengers;
+                      final currentPassengers = data['currentPassengers'] ?? 0;
+                      final maxCapacity = data['maxCapacity'] ?? 20;
+                      final availableSeats = maxCapacity - currentPassengers;
 
-            return ListTile(
-              leading: const Icon(Icons.directions_bus, color: Colors.green),
-              title: Text("Jeepney $id"),
-              subtitle: Column(
-                crossAxisAlignment: CrossAxisAlignment.start,
-                children: [
-                  Text(
-                    eta != null && eta != double.infinity
-                        ? "ETA: ${eta.toStringAsFixed(1)} min"
-                        : "Calculating ETA...",
-                  ),
-                  Text(
-                    "👥 $currentPassengers/$maxCapacity passengers",
-                    style: TextStyle(
-                      color: availableSeats > 0 ? Colors.green : Colors.red,
-                      fontWeight: FontWeight.w500,
-                    ),
-                  ),
-                  Text(
-                    "🪑 $availableSeats seats available",
-                    style: const TextStyle(fontSize: 12, color: Colors.grey),
-                  ),
-                ],
-              ),
-              trailing: _selectedJeepId == id
-                  ? const Icon(Icons.check_circle, color: Colors.green)
-                  : const Icon(Icons.radio_button_unchecked, color: Colors.grey),
-              onTap: () {
-                setState(() {
-                  _selectedJeepId = id;
-                  _hasSelectedJeep = true;
-                  _updatePolyline();
-                });
-
-                SnackbarService.show(context, '✅ Selected Jeepney $id ($availableSeats seats available)', duration: const Duration(seconds: 1));
-              },
-            );
-          }),
+                      return GestureDetector(
+                        onTap: () {
+                          setState(() {
+                            _selectedJeepId = id;
+                            _hasSelectedJeep = true;
+                            _updatePolyline();
+                          });
+                          SnackbarService.show(context, '✅ Selected Jeepney $id ($availableSeats seats available)', duration: const Duration(seconds: 1));
+                        },
+                        child: Container(
+                          width: cardWidthFull,
+                          margin: const EdgeInsets.only(right: 8),
+                          padding: const EdgeInsets.all(10),
+                          decoration: BoxDecoration(
+                            color: Colors.white.withOpacity(0.06),
+                            borderRadius: BorderRadius.circular(12),
+                          ),
+                          child: Column(
+                            crossAxisAlignment: CrossAxisAlignment.start,
+                            children: [
+                              Text('Jeep $id', style: const TextStyle(color: Colors.white, fontWeight: FontWeight.bold, fontSize: 14)),
+                              const SizedBox(height: 6),
+                              Text(eta != null && eta != double.infinity ? '${eta.toStringAsFixed(1)} min' : 'Calculating', style: const TextStyle(color: Colors.white70, fontSize: 12)),
+                              const SizedBox(height: 6),
+                              Text('$availableSeats seats', style: const TextStyle(color: Colors.greenAccent, fontSize: 12)),
+                            ],
+                          ),
+                        ),
+                      );
+                    }).toList()
+                  : [
+                      _buildPlaceholderCard(width: cardWidthFull),
+                      _buildPlaceholderCard(width: cardWidthFull),
+                      _buildPlaceholderCard(width: cardWidthFull),
+                    ],
+            ),
+          ),
         ],
       ),
     );
+
+    if (showNoAvailableOnRoute) {
+      return Stack(alignment: Alignment.center, children: [
+        Opacity(opacity: 0.35, child: container),
+        Padding(
+          padding: const EdgeInsets.symmetric(horizontal: 20.0),
+          child: const Text(
+            'No available jeepneys with seats on your route nearby.',
+            textAlign: TextAlign.center,
+            style: TextStyle(color: Colors.white, fontSize: 14),
+          ),
+        ),
+      ]);
+    }
+
+    return container;
   }
 
-  Widget _buildInfoCard(String text) => Container(
-    margin: const EdgeInsets.all(16),
-    padding: const EdgeInsets.all(12),
-    decoration: BoxDecoration(
-      color: const Color.fromARGB(255, 255, 255, 255),
-      borderRadius: BorderRadius.circular(12),
-      boxShadow: [BoxShadow(color: Colors.black12, blurRadius: 8)],
-    ),
-    child: Center(child: Text(text)),
-  );
+  // Info card helper removed - using inline overlays/placeholders instead
 
 
   // ✅ ADDED: Compact ads button for top-right
@@ -786,20 +882,197 @@ class _PasaheroHomeState extends State<PasaheroHome> with WidgetsBindingObserver
   List<Widget> _buildPasaheroActions() => [
     Column(
       children: [
-        Row(
+            Row(
           children: [
 
-            SingleChildScrollView(
-              child: _buildJeepneySuggestionList()),
+            // Make the suggestion area expand to available width and scroll horizontally
+            Expanded(
+              child: SizedBox(
+                height: 120,
+                child: SingleChildScrollView(
+                  scrollDirection: Axis.horizontal,
+                  child: _buildJeepneySuggestionList(compact: true),
+                ),
+              ),
+            ),
             const SizedBox(width: 8),
+          ],),
+        DestinationDisplay(roleLabel: "PASAHERO"),
             
-            
-            
+        Container(
+          width: double.infinity,
+          child: Row(
+            children: [
+              Container(  
+                
+                padding: EdgeInsets.symmetric(horizontal: 17, vertical: 5),
+                margin: EdgeInsets.only(right: 5,top: 10,bottom: 10),
+                decoration: BoxDecoration(
+                  borderRadius: BorderRadius.circular(10),
+                  gradient: LinearGradient(colors: const [
+                    Color.fromARGB(255, 52, 63, 128),
+                   Color.fromARGB(255, 90, 35, 134),
+                  ],
+                  ),
+          
+                ),
+                child: Column(
+                  children: [
+                    Text('ABC XXX', style: TextStyle( 
+                      height: 1,
+                      fontSize: 28,
+                      fontWeight: FontWeight.bold,
+                      color: Colors.white,
+                    ),
+                    ),
+                    Row(
+                      children: [
+                        Icon(Icons.person, color: Colors.white, size: 10,),
+                        Text("Driver's Name", style: TextStyle( 
+                          height: 1,
+                          fontSize: 10,
+                          fontWeight: FontWeight.bold,
+                          color: Colors.white,
+                        ),
+                        ),
+                      ],
+                    ),
+                  ],
+                )
+                ),
+              Column(
+                children: [
+                  Container(
+                    
+                    child: Column(
+                      crossAxisAlignment: CrossAxisAlignment.start,
+                      children: [
+                        Text('Destination:', style: TextStyle( 
+                          height: 1,
+                          fontSize: 11,
+                          fontWeight: FontWeight.bold,
+                          color: const Color.fromARGB(255, 196, 196, 196),
+                        ),
+                        textAlign: TextAlign.start,
+                        ),
+                        
+                        Text("Approx. Fare", style: TextStyle( 
+                          height: 1,
+                          fontSize: 11,
+                          fontWeight: FontWeight.bold,
+                          color: const Color.fromARGB(255, 196, 196, 196),
+                      
+                        ),   
+                        textAlign: TextAlign.left,
+                        ),
+                        Text("Jeep Route", style: TextStyle( 
+                          fontSize: 9,
+                          fontWeight: FontWeight.bold,
+                          color: const Color.fromARGB(255, 218, 218, 218),
+                        ),   
+                        textAlign: TextAlign.left,
+                        ),
+                        
+                      ],
+                    ),
+                  )
+                  
+                ],
+              ),
+              Spacer(),
+              Column(
+                crossAxisAlignment: CrossAxisAlignment.end,
+                children: [
+                  Text('00 meters', style: TextStyle( 
+                    height: 1,
+                    fontSize: 11,
+                    fontWeight: FontWeight.bold,
+                    color: Colors.white,
+                  ),
+                  ), 
+                  Text('00 Pesos', style: TextStyle( 
+                    height: 1,
+                    fontSize: 11,
+                    fontWeight: FontWeight.bold,
+                    color: Colors.white,
+                  ),
+                  ), 
+                  Text('00 Pesos', style: TextStyle( 
+                    fontSize: 9,
+                    fontWeight: FontWeight.bold,
+                    color: const Color.fromARGB(0, 255, 255, 255),
+                  ),
+                  ), 
+
+                ],
+                
+              )
+            ],
+          
+          ),
+        ),    
              
-
-
-          ],
+       GestureDetector(
+        behavior: HitTestBehavior.opaque,
+        onTapDown: (_) {
+          setState(() {
+            _paraScalePasahero = 1.08;
+            _paraPressedPasahero = true;
+          });
+        },
+        onTapUp: (_) {
+          _triggerPasaheroPara(longPress: false);
+        },
+        onTapCancel: () {
+          setState(() {
+            _paraScalePasahero = 1.0;
+            _paraPressedPasahero = false;
+          });
+        },
+        onLongPress: () async {
+          // keep visual and show cancel placeholder
+          setState(() {
+            _paraScalePasahero = 1.12;
+            _paraPressedPasahero = true;
+          });
+          SnackbarService.show(context, '🚍 Cancel Ride(Placeholder)');
+          await Future.delayed(const Duration(milliseconds: 220));
+          if (mounted) {
+            setState(() {
+              _paraScalePasahero = 1.0;
+              _paraPressedPasahero = false;
+            });
+          }
+        },
+         child: AnimatedScale(
+          scale: _paraScalePasahero,
+          duration: const Duration(milliseconds: 120),
+          curve: Curves.easeOutBack,
+          child: AnimatedContainer(
+            duration: const Duration(milliseconds: 120),
+            decoration: BoxDecoration(
+              gradient: RadialGradient(
+                center: Alignment.center,
+                radius: 3,
+                colors: [
+                  (_paraPressedPasahero ? _paraGradientStartActivePasahero : _paraGradientStartPasahero),
+                  (_paraPressedPasahero ? _paraGradientEndActivePasahero : _paraGradientEndPasahero),
+                ],
+              ),
+              borderRadius: BorderRadius.circular(22),
+            ),
+            margin: const EdgeInsets.only(bottom: 10),
+            padding: const EdgeInsets.symmetric(horizontal: 40, vertical: 5),
+            child: Text('PARA!', style: TextStyle(
+              fontWeight: FontWeight.w900,
+              fontSize: 25,
+              fontFamily: GoogleFonts.roboto().fontFamily,
+              color: Colors.white
+            ),
+            ),
+          ),
         ),
+       )
       ],
 
     )
@@ -847,6 +1120,7 @@ class _PasaheroHomeState extends State<PasaheroHome> with WidgetsBindingObserver
 
         // ✅ ADDED: Compact ads button positioned in top-right
         _buildCompactAdsButton(),
+
       ],
     );
   }
@@ -860,6 +1134,7 @@ class _PasaheroHomeState extends State<PasaheroHome> with WidgetsBindingObserver
       roleActions: _buildPasaheroActions(),
       roleContentBuilder: _buildRoleContent,
       onMapTap: _onMapTap,
+      
 
     );
   }

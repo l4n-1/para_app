@@ -8,12 +8,15 @@ import 'package:para2/pages/login/login.dart';
 import 'package:para2/pages/home/shared_home.dart';
 import 'package:para2/pages/login/qr_scan_page.dart';
 import 'package:para2/services/RealtimeDatabaseService.dart';
+import 'dart:math' as math;
+import 'package:para2/services/ui_utils.dart';
 import 'package:para2/services/button_actions.dart';
 import 'package:para2/services/map_theme_service.dart';
 import 'package:para2/theme/app_icons.dart';
 import 'package:para2/pages/settings/profile_settings.dart';
 import 'package:para2/pages/biyahe/biyahe_logs_page.dart';
 import 'package:para2/services/snackbar_service.dart';
+import 'package:para2/widgets/destination_display.dart';
 
 
 
@@ -36,16 +39,26 @@ class _TsuperheroHomeState extends State<TsuperheroHome> {
   String _plateNumber = 'DRVR-XXX';
   bool _isOnline = false;
   String? _trackerId;
+  String _displayName = 'Driver';
 
   // Manual passenger counter
   int _currentPassengers = 0;
   int _maxCapacity = 20;
   bool _isEditingCapacity = false;
+  // Driver actions state
+  bool _showRouteMenu = false;
+  String _selectedRoute = '';
+  final List<String> _presetRoutes = [
+    'Plaridel Crossing ↔ Malolos Crossing',
+    'Downtown Loop',
+    'Market District ↔ Station',
+  ];
 
   @override
   void initState() {
     super.initState();
     _initDriverData();
+    _loadUserDisplayName();
   }
 
   Future<void> _initDriverData() async {
@@ -671,8 +684,274 @@ class _TsuperheroHomeState extends State<TsuperheroHome> {
       // ADD TO BOTH FILES IN _buildPasaheroMenu() AND _buildDriverMenu()
 
   List<Widget> _buildDriverActions() => [
-    
+    Column(
+      children: [
+        Row(
+          children: [
+            // Passenger suggestion area - horizontal, bounded height
+            Expanded(
+              child: SizedBox(
+                height: 120,
+                child: StreamBuilder<QuerySnapshot>(
+                  stream: FirebaseFirestore.instance
+                      .collection('para_requests')
+                      .where('status', isEqualTo: 'pending')
+                      .snapshots(),
+                  builder: (context, snapshot) {
+                    final cardWidth = UIUtils.responsiveCardWidth(context, fraction: 0.45, maxPx: 180.0);
+
+                    if (!snapshot.hasData) {
+                      return const Center(child: CircularProgressIndicator());
+                    }
+
+                    final docs = snapshot.data!.docs;
+                    // Filter requests that are reasonably close to driver (if we have tracker)
+                    final nearby = <QueryDocumentSnapshot>[];
+                    for (final d in docs) {
+                      final data = d.data() as Map<String, dynamic>;
+                      if (data['passengerLocation'] != null && _jeepMarker != null) {
+                        final GeoPoint gp = data['passengerLocation'];
+                        final dist = _distanceKm(LatLng(gp.latitude, gp.longitude), _jeepMarker!.position);
+                        if (dist <= 5.0) {
+                          nearby.add(d);
+                          continue;
+                        }
+                      }
+                      // fallback: include anyway
+                      nearby.add(d);
+                    }
+
+                    if (nearby.isEmpty) {
+                      return SingleChildScrollView(
+                        scrollDirection: Axis.horizontal,
+                        child: Row(children: [
+                          _buildPassengerPlaceholder(cardWidth),
+                          _buildPassengerPlaceholder(cardWidth * 0.9),
+                        ]),
+                      );
+                    }
+
+                    return ListView(
+                      scrollDirection: Axis.horizontal,
+                      children: nearby.take(6).map((d) {
+                        final data = d.data() as Map<String, dynamic>;
+                        final id = d.id;
+                        double? distKm;
+                        if (data['passengerLocation'] != null && _jeepMarker != null) {
+                          final gp = data['passengerLocation'] as GeoPoint;
+                          distKm = _distanceKm(LatLng(gp.latitude, gp.longitude), _jeepMarker!.position);
+                        }
+
+                        return GestureDetector(
+                          onTap: () {
+                            // Driver taps passenger card - show info
+                            SnackbarService.show(context, 'Selected request $id');
+                          },
+                          child: Container(
+                            width: cardWidth,
+                            margin: const EdgeInsets.only(right: 8, top: 6, bottom: 6),
+                            padding: const EdgeInsets.all(8),
+                            decoration: BoxDecoration(
+                              color: Colors.white.withOpacity(0.06),
+                              borderRadius: BorderRadius.circular(10),
+                            ),
+                            child: Column(
+                              crossAxisAlignment: CrossAxisAlignment.start,
+                              children: [
+                                Text('Req $id', style: const TextStyle(color: Colors.white, fontWeight: FontWeight.bold)),
+                                const SizedBox(height: 6),
+                                Text(data['passengerName'] ?? 'Passenger', style: const TextStyle(color: Colors.white70, fontSize: 12)),
+                                const SizedBox(height: 6),
+                                Text(distKm != null ? '${distKm.toStringAsFixed(1)} km' : 'Calculating', style: const TextStyle(color: Colors.greenAccent, fontSize: 12)),
+                              ],
+                            ),
+                          ),
+                        );
+                      }).toList(),
+                    );
+                  },
+                ),
+              ),
+            ),
+            const SizedBox(width: 8),
+            // Fare / small action button placeholder
+            Container(
+              margin: const EdgeInsets.only(right: 8),
+              padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 10),
+              decoration: BoxDecoration(
+                color: Colors.white.withOpacity(0.06),
+                borderRadius: BorderRadius.circular(12),
+              ),
+              child: Column(
+                children: const [
+                  Icon(Icons.attach_money, color: Colors.white),
+                  SizedBox(height: 4),
+                  Text('Fare', style: TextStyle(color: Colors.white)),
+                ],
+              ),
+            ),
+          ],
+        ),
+
+        const SizedBox(height: 8),
+
+        // Seat management meter
+        Container(
+          margin: const EdgeInsets.symmetric(horizontal: 16),
+          child: Column(
+            crossAxisAlignment: CrossAxisAlignment.start,
+            children: [
+              const Text('Seats', style: TextStyle(color: Colors.white, fontWeight: FontWeight.bold)),
+              // Large, easy-to-tap +/- buttons for adjusting passenger count
+              Padding(
+                padding: const EdgeInsets.symmetric(vertical: 8.0),
+                child: Row(
+                  mainAxisAlignment: MainAxisAlignment.center,
+                  children: [
+                    // Decrement button
+                    ElevatedButton(
+                      onPressed: _decrementPassengers,
+                      style: ElevatedButton.styleFrom(
+                        shape: const CircleBorder(),
+                        minimumSize: const Size(64, 64),
+                        padding: const EdgeInsets.all(0),
+                        backgroundColor: Colors.redAccent,
+                        elevation: 6,
+                      ),
+                      child: const Icon(Icons.remove, size: 36, color: Colors.white),
+                    ),
+
+                    const SizedBox(width: 20),
+
+                    // Passenger count display
+                    Container(
+                      padding: const EdgeInsets.symmetric(horizontal: 20, vertical: 12),
+                      decoration: BoxDecoration(
+                        color: Colors.white.withOpacity(0.06),
+                        borderRadius: BorderRadius.circular(12),
+                      ),
+                      child: Column(
+                        children: [
+                          Text('$_currentPassengers', style: const TextStyle(color: Colors.white, fontSize: 28, fontWeight: FontWeight.bold)),
+                          const SizedBox(height: 4),
+                          Text('/ $_maxCapacity', style: const TextStyle(color: Colors.white70, fontSize: 12)),
+                        ],
+                      ),
+                    ),
+
+                    const SizedBox(width: 20),
+
+                    // Increment button
+                    ElevatedButton(
+                      onPressed: _incrementPassengers,
+                      style: ElevatedButton.styleFrom(
+                        shape: const CircleBorder(),
+                        minimumSize: const Size(64, 64),
+                        padding: const EdgeInsets.all(0),
+                        backgroundColor: Colors.green,
+                        elevation: 6,
+                      ),
+                      child: const Icon(Icons.add, size: 36, color: Colors.white),
+                    ),
+                  ],
+                ),
+              ),
+              Row(
+                mainAxisAlignment: MainAxisAlignment.spaceBetween,
+                children: [
+                  Text('$_currentPassengers / $_maxCapacity', style: const TextStyle(color: Colors.white)),
+                  TextButton(onPressed: _showCapacityEditor, child: const Text('Edit')),
+                ],
+              ),
+            ],
+          ),
+        ),
+
+        // Destination / Route selector (wrapped with dropdown)
+        Padding(
+          padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 8),
+          child: Column(
+            children: [
+              GestureDetector(
+                onTap: () {
+                  setState(() {
+                    _showRouteMenu = !_showRouteMenu;
+                  });
+                },
+                child: Column(
+                  children: [
+                    DestinationDisplay(roleLabel: 'TSUPERHERO'),
+                    if (_selectedRoute.isNotEmpty)
+                      Padding(
+                        padding: const EdgeInsets.only(top: 6.0),
+                        child: Text('Selected: $_selectedRoute', style: const TextStyle(color: Colors.white70, fontSize: 12)),
+                      ),
+                  ],
+                ),
+              ),
+              if (_showRouteMenu)
+                Container(
+                  margin: const EdgeInsets.only(top: 8),
+                  padding: const EdgeInsets.all(8),
+                  decoration: BoxDecoration(
+                    color: Colors.white.withOpacity(0.06),
+                    borderRadius: BorderRadius.circular(8),
+                  ),
+                  child: Column(
+                    children: _presetRoutes.map((r) {
+                      return ListTile(
+                        dense: true,
+                        title: Text(r, style: const TextStyle(color: Colors.white)),
+                        onTap: () {
+                          setState(() {
+                            _selectedRoute = r;
+                            _showRouteMenu = false;
+                          });
+                          SnackbarService.show(context, 'Selected route: $r');
+                        },
+                      );
+                    }).toList(),
+                  ),
+                ),
+            ],
+          ),
+        ),
+      ],
+    ),
   ];
+
+  // Helper: build a placeholder passenger card
+  Widget _buildPassengerPlaceholder(double width) {
+    return Container(
+      width: width,
+      margin: const EdgeInsets.only(right: 8, top: 6, bottom: 6),
+      padding: const EdgeInsets.all(10),
+      decoration: BoxDecoration(
+        color: Colors.white.withOpacity(0.04),
+        borderRadius: BorderRadius.circular(10),
+      ),
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: const [
+          SizedBox(height: 8),
+          Text('Passenger', style: TextStyle(color: Colors.white, fontWeight: FontWeight.bold)),
+          SizedBox(height: 6),
+          Text('Waiting', style: TextStyle(color: Colors.white70, fontSize: 12)),
+          SizedBox(height: 6),
+          Text('– km', style: TextStyle(color: Colors.greenAccent, fontSize: 12)),
+        ],
+      ),
+    );
+  }
+
+  double _degToRad(double deg) => deg * math.pi / 180;
+  double _distanceKm(LatLng a, LatLng b) {
+    const R = 6371;
+    final dLat = _degToRad(b.latitude - a.latitude);
+    final dLon = _degToRad(b.longitude - a.longitude);
+    final aVal = math.sin(dLat / 2) * math.sin(dLat / 2) + math.cos(_degToRad(a.latitude)) * math.cos(_degToRad(b.latitude)) * math.sin(dLon / 2) * math.sin(dLon / 2);
+    return R * 2 * math.atan2(math.sqrt(aVal), math.sqrt(1 - aVal));
+  }
 
   Future<void> _handleSignOut() async {
     await _auth.signOut();
@@ -713,9 +992,9 @@ class _TsuperheroHomeState extends State<TsuperheroHome> {
           }
         }
 
-        // Update any display name variables in your state
+        // Update display name in state
         setState(() {
-          // Update your display name variable here
+          _displayName = formattedName;
         });
       }
     } catch (e) {
