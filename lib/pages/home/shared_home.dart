@@ -74,6 +74,7 @@ class _SharedHomeState extends State<SharedHome> with TickerProviderStateMixin {
   late final AnimationController _bottomPanelController;
   late final Animation<Offset> _bottomPanelOffset;
 
+  String _pasaDest = '';
   String _displayName = 'User';
   bool _isProfileIncomplete = false;
   bool _featuresLocked = false;
@@ -127,6 +128,7 @@ class _SharedHomeState extends State<SharedHome> with TickerProviderStateMixin {
     _checkProfileCompletion();
     _loadUserDisplayName();
     _loadUserCoins();
+    _fireDest();
 
     // Subscribe to app-wide location broadcasts so this SharedHome instance
     // receives live location updates even if callers can't find the ancestor.
@@ -168,6 +170,8 @@ class _SharedHomeState extends State<SharedHome> with TickerProviderStateMixin {
     }
   }
 
+
+
   Future<void> _loadUserDisplayName() async {
     final user = FirebaseAuth.instance.currentUser;
     if (user == null) return;
@@ -207,8 +211,29 @@ class _SharedHomeState extends State<SharedHome> with TickerProviderStateMixin {
     }
   }
 
+  Future<void> _fireDest() async {
+    final user = FirebaseAuth.instance.currentUser;
+    if (user == null) return;
 
+    try {
+      final doc = await FirebaseFirestore.instance.collection('para_requests').doc(user.uid).get();
+      if (doc.exists) {
+        final data = doc.data()!;
+        final dest = data['destination']?.toString() ?? '';
 
+        if (dest.isNotEmpty) {
+          SnackbarService.show(context, 'Your current destination is: $dest', duration: const Duration(seconds: 3));
+        } else {
+          SnackbarService.show(context, 'No destination set. Please set your destination in profile settings.', duration: const Duration(seconds: 3));
+        }
+        setState(() {
+          _pasaDest = dest;
+        });
+      }
+    } catch (e) {
+      debugPrint('Error fetching destination: $e');
+    }
+  }
   // ✅ ADD: Load user coins from Firestore
   Future<void> _loadUserCoins() async {
     final user = FirebaseAuth.instance.currentUser;
@@ -1036,6 +1061,7 @@ class _SharedHomeState extends State<SharedHome> with TickerProviderStateMixin {
                             ),
                             // Reuse role menu items inside bottom panel
                             ...widget.roleActions,
+                            _buildDestDisplay(),
                           ],
                         ),
                       
@@ -1091,7 +1117,7 @@ class _SharedHomeState extends State<SharedHome> with TickerProviderStateMixin {
               const Color.fromARGB(255, 4, 3, 5),
               const Color.fromARGB(255, 62, 60, 68),
             ],),
-            color: Colors.black.withOpacity(0.98),
+            color: Colors.black.withOpacity(0.9),
           borderRadius: const BorderRadius.only(
             topRight: Radius.circular(35),
             bottomRight: Radius.circular(35),
@@ -1292,6 +1318,66 @@ class _SharedHomeState extends State<SharedHome> with TickerProviderStateMixin {
     );  
   }
 
+  // ignore: strict_top_level_inference
+  _buildDestDisplay() {
+    return
+      Column(
+        children: [
+          Container(
+            alignment: Alignment.centerLeft,
+            child: Text(widget.roleLabel == 'TSUPERHERO'
+                                      ? ('Your Route  ')
+                                      : ('Your Destination '),
+                    style: TextStyle(
+                      height: 2,
+                      fontSize: 12,
+                      fontWeight: FontWeight.bold,
+                      color: Colors.white
+                    ),
+                    textAlign: TextAlign.left),
+          ),
+          Container(
+            padding: const EdgeInsets.all(5),
+            decoration: BoxDecoration(
+              color: const Color.fromARGB(255, 73, 71, 85),
+              borderRadius: BorderRadius.circular(25),
+              boxShadow: [
+                BoxShadow(
+                  color: Colors.black.withOpacity(0.2),
+                  blurRadius: 6,
+                  offset: const Offset(0, 3),
+                ),
+              ],
+            ),
+            child: Row(
+              children: [
+                Image.asset('assets/USERPIN.png', height: 22),
+                Text(widget.roleLabel == 'TSUPERHERO'
+                                    ? ('not yet implemented')
+                                    : ('To  '+_pasaDest),
+                  style: TextStyle(
+                    height: 1,
+                    fontSize: 14,
+                    fontWeight: FontWeight.bold,
+                    color: Colors.white,
+                  ),
+                ),
+              ],
+          
+          
+            )
+          
+            ),
+        ],
+      );
+      
+    
+
+  }
+        
+        
+      
+  
   // Add missing variable declaration
   BitmapDescriptor? _userDirectionalIcon;
 }

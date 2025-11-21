@@ -637,7 +637,6 @@ class _PasaheroHomeState extends State<PasaheroHome> with WidgetsBindingObserver
     child: Center(child: Text(text)),
   );
 
- 
 
   // ✅ ADDED: Compact ads button for top-right
   Widget _buildCompactAdsButton() {
@@ -792,6 +791,7 @@ class _PasaheroHomeState extends State<PasaheroHome> with WidgetsBindingObserver
 
             SingleChildScrollView(
               child: _buildJeepneySuggestionList()),
+            const SizedBox(width: 8),
             
             
             
