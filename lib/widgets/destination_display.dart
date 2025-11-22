@@ -1,14 +1,16 @@
-import 'package:cloud_firestore/cloud_firestore.dart';
+﻿import 'package:cloud_firestore/cloud_firestore.dart';
 import 'package:firebase_auth/firebase_auth.dart';
 import 'package:flutter/material.dart';
 import 'package:para2/services/snackbar_service.dart';
 
 class DestinationDisplay extends StatefulWidget {
   final String roleLabel;
+  final String? selectedRoute;
 
   const DestinationDisplay({
     super.key,
     required this.roleLabel,
+    this.selectedRoute,
   });
 
   @override
@@ -67,7 +69,6 @@ class _DestinationDisplayState extends State<DestinationDisplay> {
             widget.roleLabel == 'TSUPERHERO' ? 'Your Route' : 'Your Destination',
             textAlign: TextAlign.left,
             style: const TextStyle(
-              
               height: 2,
               fontSize: 12,
               fontWeight: FontWeight.bold,
@@ -76,20 +77,30 @@ class _DestinationDisplayState extends State<DestinationDisplay> {
           ),
         ),
         const SizedBox(height: 4),
-         Container(
-              padding: const EdgeInsets.all(5),
-              decoration: BoxDecoration(
-                color: const Color.fromARGB(255, 80, 79, 85),
-                borderRadius: BorderRadius.circular(25),
-              ),
-              child: Row(
-                children: [
-                  Image.asset('assets/USERPIN.png', height: 22),
-                  const SizedBox(width: 8),
-                  Text(
+        Container(
+          padding: const EdgeInsets.all(5),
+          decoration: BoxDecoration(
+            color: const Color.fromARGB(255, 80, 79, 85),
+            borderRadius: BorderRadius.circular(25),
+          ),
+          child: Row(
+            children: [
+              Image.asset('assets/USERPIN.png', height: 22),
+              const SizedBox(width: 8),
+
+              // Ensure long route/destination text scales down to avoid overflow
+              Expanded(
+                child: FittedBox(
+                  alignment: Alignment.centerLeft,
+                  fit: BoxFit.scaleDown,
+                  child: Text(
                     widget.roleLabel == 'TSUPERHERO'
-                        ? 'not yet implemented'
+                        ? (widget.selectedRoute != null && widget.selectedRoute!.isNotEmpty
+                            ? widget.selectedRoute!
+                            : 'Select Route')
                         : 'To $_destination',
+                    maxLines: 1,
+                    overflow: TextOverflow.ellipsis,
                     style: const TextStyle(
                       height: 1,
                       fontSize: 14,
@@ -97,10 +108,11 @@ class _DestinationDisplayState extends State<DestinationDisplay> {
                       color: Colors.white,
                     ),
                   ),
-                ],
+                ),
               ),
-            ),
-          
+            ],
+          ),
+        ),
       ],
     );
   }

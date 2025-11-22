@@ -1,3 +1,4 @@
+for shared_home.dart
 import 'dart:async';
 import 'package:flutter/material.dart';
 import 'package:google_fonts/google_fonts.dart';
@@ -11,50 +12,34 @@ import 'package:para2/pages/settings/profile_settings.dart';
 import 'package:para2/theme/app_icons.dart';
 import 'package:para2/services/location_service.dart';
 import 'package:para2/pages/settings/PHdashboard.dart';
-import 'package:para2/pages/settings/THdashboard.dart';
+import 'package:provider/provider.dart';
 // map theme applied via MapControllerService when controller is set
 import 'package:para2/services/map_controller_service.dart';
 import 'package:para2/services/button_actions.dart';
 import 'package:para2/services/follow_service.dart';
 import 'package:para2/services/snackbar_service.dart';
 import 'package:para2/services/location_broadcast.dart';
-import 'dart:math' as math;
-import 'package:para2/services/ui_utils.dart';
 
 class SharedHome extends StatefulWidget {
   final String roleLabel;
   final VoidCallback onSignOut;
   final List<Widget> roleMenu;
-  final List<Widget> roleActions;
-
   final Widget Function(
-      BuildContext context,
+      BuildContext,
       String displayName,
       LatLng? userLoc,
-      void Function(LatLng position) onMapTap,
       )
   roleContentBuilder;
-  final Set<Polyline> Function()? externalPolylinesBuilder;
   final void Function(LatLng position)? onMapTap;
-  final Widget? centerAction;
-  // Optional: driver-specific callback to toggle online status from the
-  // SharedHome UI (used by the driver role to provide a fast toggle).
-  final Future<void> Function()? onDriverToggleOnline;
-  // Optional flag to indicate whether the driver is currently online.
-  final bool? isDriverOnline;
+  final Set<Polyline> Function()? externalPolylinesBuilder;
 
   const SharedHome({
     super.key,
     required this.roleLabel,
     required this.onSignOut,
     required this.roleMenu,
-    required this.roleActions,
     required this.roleContentBuilder,
-    this.onMapTap,
-    this.externalPolylinesBuilder,
-    this.centerAction,
-    this.onDriverToggleOnline,
-    this.isDriverOnline,
+    this.onMapTap, this.externalPolylinesBuilder,
   });
 
   static _SharedHomeState? of(BuildContext context) =>
@@ -71,21 +56,8 @@ class _SharedHomeState extends State<SharedHome> with TickerProviderStateMixin {
   final Map<MarkerId, Marker> _markers = {};
   final Map<String, Marker> _jeepMarkers = {};
   final Map<PolylineId, Polyline> _polylines = {};
-  // Track which polyline IDs were provided by external callers so we only
-  // modify those entries when external updates arrive. This avoids
-  // touching internally-managed polylines and reduces flicker by
-  // preventing unnecessary replacement of identical polylines.
-  final Set<PolylineId> _externalPolylineIds = {};
-  // Debounce incoming external updates: coalesce multiple quick updates
-  // to avoid repeated remove/add cycles on the GoogleMap which can cause
-  // visual flicker. Updates are applied after this short delay.
-  final Map<PolylineId, Polyline> _pendingIncoming = {};
-  Timer? _externalApplyTimer;
-  static const Duration _externalApplyDelay = Duration(milliseconds: 120);
 
   StreamSubscription? _devicesSub;
-  StreamSubscription<LatLng>? _locationBroadcastSub;
-  StreamSubscription<QuerySnapshot<Map<String, dynamic>>>? _activeRoutesSub;
 
   bool _isMapReady = false;
   bool _hasCenteredOnUser = false;
@@ -95,11 +67,6 @@ class _SharedHomeState extends State<SharedHome> with TickerProviderStateMixin {
   bool _isPanelOpen = false;
   late final AnimationController _panelController;
   late final Animation<Offset> _panelOffset;
-
-  // Bottom panel (PARA!) state + animation
-  bool _isBottomPanelOpen = false;
-  late final AnimationController _bottomPanelController;
-  late final Animation<Offset> _bottomPanelOffset;
 
   String _displayName = 'User';
   bool _isProfileIncomplete = false;
@@ -116,12 +83,6 @@ class _SharedHomeState extends State<SharedHome> with TickerProviderStateMixin {
 
   // User coins
   double _userCoins = 0.0;
-
-  // PARA! button animation state
-  double _paraScale = 1.0;
-  bool _paraPressed = false;
-  final Color _paraBaseColor = const Color.fromARGB(255, 160, 0, 200);
-  final Color _paraActiveColor = const Color.fromARGB(255, 210, 30, 240);
 
   // default initial camera (used until we resolve a last-known location)
   CameraPosition _initialCamera = const CameraPosition(
@@ -144,15 +105,6 @@ class _SharedHomeState extends State<SharedHome> with TickerProviderStateMixin {
           CurvedAnimation(parent: _panelController, curve: Curves.easeInOut),
         );
 
-    // Bottom panel slides vertically from bottom -> up
-    _bottomPanelController = AnimationController(
-      vsync: this,
-      duration: const Duration(milliseconds: 300),
-    );
-    _bottomPanelOffset = Tween<Offset>(begin: const Offset(0.0, 1.0), end: Offset.zero).animate(
-      CurvedAnimation(parent: _bottomPanelController, curve: Curves.easeInOut),
-    );
-
     _loadCustomMarkers();
     // Try to set an initial camera from a cached "last known" location
     _applyLastKnownLocationToInitialCamera();
@@ -160,11 +112,10 @@ class _SharedHomeState extends State<SharedHome> with TickerProviderStateMixin {
     _checkProfileCompletion();
     _loadUserDisplayName();
     _loadUserCoins();
- 
+
     // Subscribe to app-wide location broadcasts so this SharedHome instance
     // receives live location updates even if callers can't find the ancestor.
-    _locationBroadcastSub = LocationBroadcast.instance.stream.listen((loc) {
-      if (!mounted) return;
+    LocationBroadcast.instance.stream.listen((loc) {
       debugPrint('LocationBroadcast -> SharedHome: $loc');
       updateUserLocation(loc);
     }, onError: (e) {
@@ -175,182 +126,6 @@ class _SharedHomeState extends State<SharedHome> with TickerProviderStateMixin {
     WidgetsBinding.instance.addPostFrameCallback((_) {
       _getCurrentLocation();
     });
-
-    // Subscribe to published active routes so pasahero users see online drivers' routes
-    _subscribeActiveRoutes();
-    // If this SharedHome is used by a driver and the driver is already
-    // online on first build, open the bottom panel immediately so the
-    // driver sees commuters/roleActions without extra taps.
-    final roleLower = widget.roleLabel.toLowerCase();
-    final isDriverRole = roleLower.contains('tsuper') || roleLower.contains('driver') || roleLower.contains('th');
-    if (isDriverRole && widget.isDriverOnline == true) {
-      _isBottomPanelOpen = true;
-      try {
-        _bottomPanelController.forward();
-      } catch (_) {}
-    }
-  }
-
-  @override
-  void didUpdateWidget(covariant SharedHome oldWidget) {
-    super.didUpdateWidget(oldWidget);
-    try {
-      final roleLower = widget.roleLabel.toLowerCase();
-      final isDriverRole = roleLower.contains('tsuper') || roleLower.contains('driver') || roleLower.contains('th');
-      // Only react for driver roles when the driver online flag changes.
-      if (isDriverRole) {
-        final wasOnline = oldWidget.isDriverOnline == true;
-        final isOnline = widget.isDriverOnline == true;
-        if (!wasOnline && isOnline) {
-          // Driver went online: ensure bottom panel is opened
-          _isBottomPanelOpen = true;
-          try {
-            _bottomPanelController.forward();
-          } catch (_) {}
-        } else if (wasOnline && !isOnline) {
-          // Driver went offline: close bottom panel
-          _isBottomPanelOpen = false;
-          try {
-            _bottomPanelController.reverse();
-          } catch (_) {}
-          // Also ensure the general panel is closed
-          _isPanelOpen = false;
-          try {
-            _panelController.reverse();
-          } catch (_) {}
-        }
-      }
-    } catch (e) {
-      debugPrint('SharedHome: didUpdateWidget error: $e');
-    }
-  }
-
-  void _subscribeActiveRoutes() {
-    // Only subscribe if Firestore is available; the listener will be a no-op
-    try {
-      _activeRoutesSub?.cancel();
-      _activeRoutesSub = FirebaseFirestore.instance
-          .collection('active_routes')
-          .snapshots()
-          .listen((snapshot) async {
-        if (!mounted) return;
-
-        final roleLower = widget.roleLabel.toLowerCase();
-        // Drivers manage their own route display locally; ignore these updates
-        final isDriverRole = roleLower.contains('tsuper') || roleLower.contains('driver') || roleLower.contains('th');
-        if (isDriverRole) return;
-
-        debugPrint('active_routes snapshot received: ${snapshot.docs.length} docs');
-
-        // Build a set of polyline entries for the active routes
-        final Map<PolylineId, Polyline> newActive = {};
-
-        for (final routeDoc in snapshot.docs) {
-          try {
-            final driversSnap = await FirebaseFirestore.instance
-                .collection('active_routes')
-                .doc(routeDoc.id)
-                .collection('drivers')
-                .get();
-
-            for (final ddoc in driversSnap.docs) {
-              final data = ddoc.data();
-              final pointsRaw = data['points'];
-              if (pointsRaw == null) {
-                debugPrint('route ${routeDoc.id} driver ${ddoc.id} has no points');
-                continue;
-              }
-
-              final pts = <LatLng>[];
-
-              // Helper to parse an individual point value into LatLng
-              LatLng? tryParsePoint(dynamic p) {
-                try {
-                  if (p == null) return null;
-                  if (p is GeoPoint) return LatLng(p.latitude, p.longitude);
-                  if (p is LatLng) return p;
-                  if (p is Map) {
-                    // Support 'lat'/'lng' and 'latitude'/'longitude' keys
-                    final latCand = (p['lat'] ?? p['latitude'] ?? p['Lat'] ?? p['latitude_deg']);
-                    final lngCand = (p['lng'] ?? p['longitude'] ?? p['Lng'] ?? p['longitude_deg']);
-                    final lat = (latCand is num) ? latCand.toDouble() : double.tryParse(latCand?.toString() ?? '');
-                    final lng = (lngCand is num) ? lngCand.toDouble() : double.tryParse(lngCand?.toString() ?? '');
-                    if (lat != null && lng != null) return LatLng(lat, lng);
-                  }
-                  if (p is List && p.length >= 2) {
-                    final a = p[0];
-                    final b = p[1];
-                    final lat = (a is num) ? a.toDouble() : double.tryParse(a?.toString() ?? '');
-                    final lng = (b is num) ? b.toDouble() : double.tryParse(b?.toString() ?? '');
-                    if (lat != null && lng != null) return LatLng(lat, lng);
-                  }
-                } catch (_) {}
-                return null;
-              }
-
-              // If it's a List (normal array), iterate
-              if (pointsRaw is List) {
-                for (final p in pointsRaw) {
-                  final parsed = tryParsePoint(p);
-                  if (parsed != null) pts.add(parsed);
-                }
-              } else if (pointsRaw is Map) {
-                // Firestore sometimes returns arrays as Maps with numeric keys
-                // Iterate values to preserve order if possible
-                final entries = pointsRaw.entries.toList()
-                  ..sort((a, b) => a.key.toString().compareTo(b.key.toString()));
-                for (final e in entries) {
-                  final parsed = tryParsePoint(e.value);
-                  if (parsed != null) pts.add(parsed);
-                }
-              } else {
-                // Fallback: try to parse as iterable
-                try {
-                  for (final p in pointsRaw) {
-                    final parsed = tryParsePoint(p);
-                    if (parsed != null) pts.add(parsed);
-                  }
-                } catch (_) {}
-              }
-
-              if (pts.isEmpty) {
-                debugPrint('route ${routeDoc.id} driver ${ddoc.id} produced 0 parsed points (raw type=${pointsRaw.runtimeType})');
-                continue;
-              }
-
-              final pid = PolylineId('active_route_${routeDoc.id}_${ddoc.id}');
-              final poly = Polyline(
-                polylineId: pid,
-                points: pts,
-                color: Colors.blueAccent.withOpacity(0.9),
-                width: 4,
-              );
-              newActive[pid] = poly;
-            }
-          } catch (e, st) {
-            debugPrint('Error parsing active_route routeDoc ${routeDoc.id}: $e\n$st');
-            continue;
-          }
-        }
-
-        if (!mounted) return;
-        setState(() {
-          // Remove any existing active_route_* entries
-          final toRemove = _polylines.keys.where((id) => id.value.startsWith('active_route_')).toList();
-          for (final id in toRemove) {
-            _polylines.remove(id);
-          }
-          // Add updated active routes
-          newActive.forEach((id, poly) => _polylines[id] = poly);
-        });
-
-        debugPrint('active_routes: applied ${newActive.length} polylines');
-      }, onError: (e) {
-        debugPrint('active_routes subscription error: $e');
-      });
-    } catch (e) {
-      debugPrint('Could not subscribe to active_routes: $e');
-    }
   }
 
   Future<void> _applyLastKnownLocationToInitialCamera() async {
@@ -367,37 +142,6 @@ class _SharedHomeState extends State<SharedHome> with TickerProviderStateMixin {
     }
   }
 
-    // Open dashboard based on user's role (pasahero -> PHDashboard, tsuperhero -> THDashboard)
-    Future<void> _openRoleDashboard() async {
-      final user = FirebaseAuth.instance.currentUser;
-      if (user == null) return;
-
-      try {
-        final doc = await FirebaseFirestore.instance.collection('users').doc(user.uid).get();
-        final role = (doc.data()?['role'] ?? 'pasahero').toString().toLowerCase();
-        if (!mounted) return;
-
-        if (role == 'tsuperhero' || role == 'th' || role == 'driver') {
-          Navigator.push(
-            context,
-            MaterialPageRoute(builder: (_) => THDashboard(displayName: _displayName)),
-          );
-        } else {
-          Navigator.push(
-            context,
-            MaterialPageRoute(builder: (_) => PHDashboard(displayName: _displayName)),
-          );
-        }
-      } catch (e) {
-        debugPrint('Error opening dashboard: $e');
-        if (!mounted) return;
-        Navigator.push(
-          context,
-          MaterialPageRoute(builder: (_) => PHDashboard(displayName: _displayName)),
-        );
-      }
-    }
-
   Future<void> _loadCustomMarkers() async {
     try {
       // Load user directional marker
@@ -408,8 +152,6 @@ class _SharedHomeState extends State<SharedHome> with TickerProviderStateMixin {
       _userDirectionalIcon = AppIcons.userPin;
     }
   }
-
-
 
   Future<void> _loadUserDisplayName() async {
     final user = FirebaseAuth.instance.currentUser;
@@ -449,6 +191,7 @@ class _SharedHomeState extends State<SharedHome> with TickerProviderStateMixin {
       debugPrint('Error loading user name: $e');
     }
   }
+
 
 
   // ✅ ADD: Load user coins from Firestore
@@ -529,16 +272,6 @@ class _SharedHomeState extends State<SharedHome> with TickerProviderStateMixin {
   }
 
   void addOrUpdateMarker(MarkerId id, Marker marker) {
-    // Prevent drivers from having a phone `user_marker` added to the map.
-    if (id == const MarkerId('user_marker')) {
-      final roleLower = widget.roleLabel.toLowerCase();
-      final isDriverRole = roleLower.contains('tsuper') || roleLower.contains('driver') || roleLower.contains('th');
-      if (isDriverRole) {
-        debugPrint('SharedHome: ignoring attempt to add user_marker for driver role');
-        return;
-      }
-    }
-
     setState(() {
       _markers[id] = marker;
     });
@@ -550,98 +283,15 @@ class _SharedHomeState extends State<SharedHome> with TickerProviderStateMixin {
     });
   }
 
-  /// Remove a jeep/device marker that was created from the RTDB devices feed.
-  ///
-  /// `deviceId` should match the key used in the RTDB (the same id passed
-  /// to `jeep_$deviceId` marker ids). This removes the marker from the
-  /// internal `_jeepMarkers` map and also clears any duplicate marker id
-  /// from the general `_markers` map for safety.
-  void removeJeepMarker(String deviceId) {
-    setState(() {
-      _jeepMarkers.remove(deviceId);
-      _markers.remove(MarkerId('jeep_$deviceId'));
-    });
-  }
-
   void clearExternalPolylines() {
-    setState(() {
-      _polylines.clear();
-    });
-    debugPrint('SharedHome: cleared external polylines');
+    setState(() => _polylines.clear());
   }
 
   void setExternalPolylines(Set<Polyline> lines) {
-    // Buffer incoming polylines and schedule a coalesced apply after a
-    // short delay. This reduces rapid remove/add cycles that can make
-    // polylines appear to blink.
-    _externalApplyTimer?.cancel();
-
-    _pendingIncoming.clear();
-    for (final p in lines) {
-      _pendingIncoming[PolylineId(p.polylineId.value)] = p;
-    }
-
-    _externalApplyTimer = Timer(_externalApplyDelay, () {
-      // Compute incoming snapshot and apply diffs similar to previous
-      // logic, but only once after debouncing.
-      final incoming = Map<PolylineId, Polyline>.from(_pendingIncoming);
-      _pendingIncoming.clear();
-
-      bool mutated = false;
-
-      bool _polylinePointsEqual(Polyline a, Polyline b) {
-        final pa = a.points;
-        final pb = b.points;
-        if (pa.length != pb.length) return false;
-        for (int i = 0; i < pa.length; i++) {
-          final aLat = pa[i].latitude.toStringAsFixed(6);
-          final aLng = pa[i].longitude.toStringAsFixed(6);
-          final bLat = pb[i].latitude.toStringAsFixed(6);
-          final bLng = pb[i].longitude.toStringAsFixed(6);
-          if (aLat != bLat || aLng != bLng) return false;
-        }
-        return true;
-      }
-
-      // Apply additions/updates
-      for (final entry in incoming.entries) {
-        final pid = entry.key;
-        final poly = entry.value;
-        final existing = _polylines[pid];
-        if (existing == null) {
-          _polylines[pid] = poly;
-          mutated = true;
-        } else {
-          if (!_polylinePointsEqual(existing, poly) || existing.color != poly.color || existing.width != poly.width) {
-            _polylines[pid] = poly;
-            mutated = true;
-          }
-        }
-      }
-
-      // Remove previously-external polylines not present now
-      final toRemove = <PolylineId>[];
-      for (final old in _externalPolylineIds) {
-        if (!incoming.containsKey(old)) toRemove.add(old);
-      }
-      for (final r in toRemove) {
-        if (_polylines.containsKey(r)) {
-          _polylines.remove(r);
-          mutated = true;
-        }
-      }
-
-      // Update tracked external ids
-      _externalPolylineIds
+    setState(() {
+      _polylines
         ..clear()
-        ..addAll(incoming.keys);
-
-      if (mutated) {
-        setState(() {});
-        debugPrint('SharedHome: setExternalPolylines -> applied ${incoming.length} lines, mutated=true');
-      } else {
-        debugPrint('SharedHome: setExternalPolylines -> no changes, skipped');
-      }
+        ..addEntries(lines.map((l) => MapEntry(l.polylineId, l)));
     });
   }
 
@@ -649,27 +299,14 @@ class _SharedHomeState extends State<SharedHome> with TickerProviderStateMixin {
 
   // ✅ FIXED: Enhanced location update with custom user marker
   Future<void> updateUserLocation(LatLng userLoc) async {
-    if (!mounted) return;
     if (userLoc.latitude == 0.0 && userLoc.longitude == 0.0) {
       debugPrint("⚠️ Invalid location (0,0) - skipping");
       return;
     }
 
-    // Update cached user location but do not display a phone/user marker
-    // for driver roles. Drivers should use their assigned jeep/tracker as the
-    // authoritative location indicator instead of the phone GPS marker.
-    final roleLower = widget.roleLabel.toLowerCase();
-    final isDriverRole = roleLower.contains('tsuper') || roleLower.contains('driver') || roleLower.contains('th');
-
     setState(() {
       _currentUserLoc = userLoc;
     });
-
-    if (isDriverRole) {
-      // Do not animate or update the `user_marker` for driver roles.
-      debugPrint('SharedHome: skipping user_marker update for driver role');
-      return;
-    }
 
     final recvTs = DateTime.now().millisecondsSinceEpoch;
     debugPrint("📍 SharedHome received location: $userLoc (recv_ts=$recvTs)");
@@ -784,14 +421,6 @@ class _SharedHomeState extends State<SharedHome> with TickerProviderStateMixin {
       final devices = raw.cast<dynamic, dynamic>();
       devices.forEach((id, rawDevice) {
         if (rawDevice is Map) {
-          final idStr = id.toString();
-          // Only create markers for ESP32-based trackers which use the
-          // naming convention `ESP32_TRACKER_XXXX`. Skip other RTDB entries
-          // to avoid duplicate or irrelevant markers.
-          if (!idStr.startsWith('ESP32_TRACKER_')) {
-            // skip non-ESP tracker devices
-            return;
-          }
           final lat = double.tryParse(
             rawDevice['latitude']?.toString() ??
                 rawDevice['lat']?.toString() ??
@@ -864,47 +493,11 @@ class _SharedHomeState extends State<SharedHome> with TickerProviderStateMixin {
       _isPanelOpen ? _panelController.forward() : _panelController.reverse();
     });
   }
-  
-  Future<void> _zoomIn() async {
-    try {
-      final ctrl = await _mapController.future;
-      _currentZoom = (_currentZoom + 1.0).clamp(2.0, 20.0);
-      await ctrl.animateCamera(CameraUpdate.zoomTo(_currentZoom));
-    } catch (e) {
-      debugPrint('zoomIn error: $e');
-    }
-  }
-
-  Future<void> _zoomOut() async {
-    try {
-      final ctrl = await _mapController.future;
-      _currentZoom = (_currentZoom - 1.0).clamp(2.0, 20.0);
-      await ctrl.animateCamera(CameraUpdate.zoomTo(_currentZoom));
-    } catch (e) {
-      debugPrint('zoomOut error: $e');
-    }
-  }
-  void _toggleBottomPanel() {
-    setState(() {
-      _isBottomPanelOpen = !_isBottomPanelOpen;
-      _isBottomPanelOpen ? _bottomPanelController.forward() : _bottomPanelController.reverse();
-    });
-  }
-  
-
-  // Public wrapper so descendant widgets can toggle the bottom panel.
-  // Use: `SharedHome.of(context)?.toggleBottomPanel();`
-  void toggleBottomPanel() => _toggleBottomPanel();
 
   @override
   void dispose() {
     _devicesSub?.cancel();
-    _locationBroadcastSub?.cancel();
-    _activeRoutesSub?.cancel();
     _panelController.dispose();
-    try {
-      _bottomPanelController.dispose();
-    } catch (_) {}
     // Dispose any active marker animation controllers
     for (final c in _markerAnimControllers.values) {
       try {
@@ -913,35 +506,7 @@ class _SharedHomeState extends State<SharedHome> with TickerProviderStateMixin {
       } catch (_) {}
     }
     _markerAnimControllers.clear();
-    // Cancel pending external polylines apply timer if any
-    try {
-      _externalApplyTimer?.cancel();
-      _externalApplyTimer = null;
-    } catch (_) {}
     super.dispose();
-  }
-
-  // Helper to animate PARA! press and trigger action
-  Future<void> _triggerPara({bool longPress = false}) async {
-    setState(() {
-      _paraPressed = true;
-      _paraScale = longPress ? 1.12 : 1.08;
-    });
-
-    try {
-      // perform the toggle action
-      _toggleBottomPanel();
-    } catch (_) {}
-
-    // keep the pressed visual briefly
-    await Future.delayed(const Duration(milliseconds: 180));
-
-    if (mounted) {
-      setState(() {
-        _paraScale = 1.0;
-        _paraPressed = false;
-      });
-    }
   }
 
   Future<void> centerMap(LatLng pos) async {
@@ -993,17 +558,6 @@ class _SharedHomeState extends State<SharedHome> with TickerProviderStateMixin {
           SnackbarService.show(context, 'Cannot get location. Check permissions and try again.', duration: const Duration(seconds: 3));
           return;
         }
-      }
-
-      // If this SharedHome is used by a driver role, center on the jeep/tracker
-      // marker instead of the phone location.
-      final roleLower = widget.roleLabel.toLowerCase();
-      final isDriverRole = roleLower.contains('tsuper') || roleLower.contains('driver') || roleLower.contains('th');
-
-      if (isDriverRole) {
-        await centerOnJeepMarker();
-        SnackbarService.show(context, 'Centered on your jeep/tracker', duration: const Duration(seconds: 1));
-        return;
       }
 
       debugPrint("📍 Centering to: $_currentUserLoc");
@@ -1164,10 +718,7 @@ class _SharedHomeState extends State<SharedHome> with TickerProviderStateMixin {
 
   @override
   Widget build(BuildContext context) {
-    // Responsive side panel width (clamp to sensible min/max values)
-    final panelWidth = UIUtils.responsiveWidthClamp(context, 0.7, minPx: 240.0, maxPx: 420.0);
-    // Responsive bottom panel height (proportional but capped)
-    final bottomPanelHeight = math.min(UIUtils.screenHeight(context) * 0.55, 380.0);
+    final panelWidth = MediaQuery.of(context).size.width * 0.7;
     
     return Scaffold(
   body: SizedBox.expand( // <-- forces Stack to fill entire screen
@@ -1190,23 +741,8 @@ class _SharedHomeState extends State<SharedHome> with TickerProviderStateMixin {
                 // Keep zoom enabled so user can zoom even while following.
                 zoomGesturesEnabled: true,
                 markers: _getRoleSpecificMarkers(),
-                polylines: (() {
-                  final Map<PolylineId, Polyline> _combined = {};
-                  // internal polylines (SharedHome-managed)
-                  _polylines.forEach((id, p) => _combined[id] = p);
-                  // external polylines provided by child pages override internal ones
-                  final external = widget.externalPolylinesBuilder?.call();
-                  if (external != null) {
-                    for (final p in external) {
-                      _combined[p.polylineId] = p;
-                    }
-                  }
-                  // Debug: print polyline count and ids
-                  try {
-                    debugPrint('SharedHome: rendering ${_combined.length} polylines: ${_combined.keys.map((k) => k.value).join(', ')}');
-                  } catch (_) {}
-                  return _combined.values.toSet();
-                })(),
+                polylines: widget.externalPolylinesBuilder?.call()
+                    ?? _polylines.values.toSet(),
                 onMapCreated: (controller) async {
                   if (!_mapController.isCompleted) {
                     _mapController.complete(controller);
@@ -1284,7 +820,7 @@ class _SharedHomeState extends State<SharedHome> with TickerProviderStateMixin {
                   GestureDetector(
                     onTap: _togglePanel,
                     child: Container(
-                      padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 5),
+                      padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 3),
                       decoration: BoxDecoration(
                         color: const Color.fromARGB(255, 16, 16, 36),
                         borderRadius: BorderRadius.circular(8),
@@ -1333,11 +869,11 @@ class _SharedHomeState extends State<SharedHome> with TickerProviderStateMixin {
 
                   const Spacer(),
                   Text(
-                    "PARA!  ",
+                    "PARA!",
                     style: TextStyle(
                       fontStyle: FontStyle.italic,
                       fontWeight: FontWeight.bold,
-                      fontSize: 15,
+                      fontSize: 18,
                       color: const Color.fromARGB(150, 255, 255, 255),
                       shadows: [Shadow(color: Colors.black.withOpacity(1.0), blurRadius: 20)],
                     ),
@@ -1356,213 +892,56 @@ class _SharedHomeState extends State<SharedHome> with TickerProviderStateMixin {
           child: Column(
             children: [
               FloatingActionButton(
-                shape: CircleBorder(),
                 mini: true,
                 backgroundColor: const Color.fromARGB(255, 193, 212, 16),
                 onPressed: _showCoinsDialog,
-                child: const Icon(Icons.monetization_on, color: Color.fromARGB(255, 28, 23, 46), size: 25),
+                child: const Icon(Icons.monetization_on, color: Color.fromARGB(255, 28, 23, 46), size: 20),
+              ),
+              const SizedBox(height: 8),
+              FloatingActionButton(
+                mini: true,
+                backgroundColor: const Color.fromARGB(255, 28, 23, 46),
+                onPressed: _centerOnUser,
+                child: const Icon(Icons.my_location, color: Color.fromARGB(255, 124, 155, 53), size: 20),
+              ),
+              const SizedBox(height: 8),
+              // Theme toggle
+              FloatingActionButton(
+                mini: true,
+                backgroundColor: const Color.fromARGB(255, 28, 23, 46),
+                onPressed: () => ButtonActions.toggleMapTheme(context, null),
+                child: const Icon(Icons.brightness_6, color:Color.fromARGB(255, 124, 155, 53), size: 20),
               ),
               const SizedBox(height: 8),
               // Follow toggle
-              GestureDetector(
-                onLongPress: () => _centerOnUser(),
-                child: ValueListenableBuilder<bool>(
-                  valueListenable: FollowService.instance.isFollowing,
-                  builder: (context, following, _) {
-                    return FloatingActionButton(
-                      mini: true,
-                      backgroundColor: const Color.fromARGB(255, 28, 27, 34),
-                      onPressed: () => ButtonActions.toggleFollowMode(context),
-                      child: Icon(
-                        following ? Icons.gps_fixed : Icons.gps_not_fixed,
-                        color: Color.fromARGB(255, 115, 47, 204),
-                        size: 20,
-                      ),
-                    );
-                  },
-                ),
-              ),
-            ],
-          ),
-        ),
-
-        // Zoom controls (mini)
-        Positioned(
-          right: 16,
-          top: 220,
-          child: Column(
-            children: [
-              FloatingActionButton(
-                mini: true,
-                backgroundColor: const Color.fromARGB(255, 28, 27, 34),
-                onPressed: _zoomIn,
-                child: const Icon(Icons.zoom_in, color: Colors.white, size: 20),
-              ),
-              const SizedBox(height: 8),
-              FloatingActionButton(
-                mini: true,
-                backgroundColor: const Color.fromARGB(255, 28, 27, 34),
-                onPressed: _zoomOut,
-                child: const Icon(Icons.zoom_out, color: Colors.white, size: 20),
+              ValueListenableBuilder<bool>(
+                valueListenable: FollowService.instance.isFollowing,
+                builder: (context, following, _) {
+                  return FloatingActionButton(
+                    mini: true,
+                    backgroundColor: const Color.fromARGB(255, 28, 23, 46),
+                    onPressed: () => ButtonActions.toggleFollowMode(context),
+                    child: Icon(
+                      following ? Icons.gps_fixed : Icons.gps_not_fixed,
+                      color: Color.fromARGB(255, 124, 155, 53),
+                      size: 20,
+                    ),
+                  );
+                },
               ),
             ],
           ),
         ),
 
         // Bottom content
-
-        // Center action: allow pages to override the PARA! button. If
-        // `widget.centerAction` is provided, render it instead (useful
-        // for driver role to show an online toggle). Otherwise show the
-        // default PARA! animated button.
-        if (widget.centerAction != null)
-          Positioned(
-            bottom: 80,
-            left: 0,
-            right: 0,
-            child: Center(child: widget.centerAction!),
-          )
-        else
-          Positioned(
-            bottom: 80,
-            left: 0,
-            right: 0,
-            child: Center(
-              child: GestureDetector(
-                behavior: HitTestBehavior.opaque,
-                onTapDown: (_) {
-                  setState(() {
-                    _paraScale = 1.08;
-                    _paraPressed = true;
-                  });
-                },
-                onTapUp: (_) async {
-                  // trigger action and animate back
-                  _triggerPara(longPress: false);
-                },
-                onTapCancel: () {
-                  setState(() {
-                    _paraScale = 1.0;
-                    _paraPressed = false;
-                  });
-                },
-                onLongPress: () async {
-                  _triggerPara(longPress: true);
-                },
-                child: AnimatedScale(
-                  scale: _paraScale,
-                  duration: const Duration(milliseconds: 120),
-                  curve: Curves.easeOutBack,
-                  child: AnimatedContainer(
-                    duration: const Duration(milliseconds: 120),
-                    padding: const EdgeInsets.symmetric(horizontal: 28, vertical: 12),
-                    decoration: BoxDecoration(
-                      color: _paraPressed ? _paraActiveColor : _paraBaseColor,
-                      borderRadius: BorderRadius.circular(24),
-                      boxShadow: [
-                        BoxShadow(
-                          color: (_paraPressed ? _paraActiveColor : _paraBaseColor).withOpacity(0.45),
-                          blurRadius: _paraPressed ? 18 : 8,
-                          offset: const Offset(0, 6),
-                        ),
-                      ],
-                    ),
-                    child: const Text('PARA!', style: TextStyle(fontWeight: FontWeight.bold, fontSize: 16, color: Colors.white)),
-                  ),
-                ),
-              ),
-            ),
-          ),
-
-
-        // Bottom slide-up panel
-        Align(
-          alignment: Alignment.bottomCenter,
-          child: SlideTransition(
-            position: _bottomPanelOffset,
-            child: SafeArea(
-              top: false,
-              child: Container(
-                width: double.infinity,
-                height: bottomPanelHeight,
-                padding: const EdgeInsets.all(16),
-                decoration: BoxDecoration(
-                  color: const Color.fromARGB(255, 39, 38, 38),
-                  borderRadius: BorderRadius.only(topLeft: Radius.circular(24), topRight: Radius.circular(24)),
-                  boxShadow: [BoxShadow(color: Colors.black26, blurRadius: 12)],
-                ),
-                child: Column(
-                  children: [
-                    Expanded(
-                        child: Column(
-                          crossAxisAlignment: CrossAxisAlignment.start,
-                          children: [
-                            Row(
-                              children: [
-                                Text(widget.roleLabel == 'TSUPERHERO'
-                                    ? 'Commuters On Your Route'
-                                    : 'Jeeps On Your Route',
-                                  style: TextStyle(
-                                  height: 1,
-                                  fontSize: 12,
-                                  fontWeight: FontWeight.bold,
-                                  color: Colors.white
-                                ),),
-                                
-                                Spacer(),
-                                
-                                GestureDetector(
-                                  onTap: widget.roleLabel == 'TSUPERHERO'
-                                      ? () async {
-                                          // If provided, call the driver's toggle callback;
-                                          // otherwise fall back to closing the bottom panel.
-                                          if (widget.onDriverToggleOnline != null) {
-                                            try {
-                                              await widget.onDriverToggleOnline!();
-                                            } catch (e) {
-                                              debugPrint('SharedHome: driver toggle failed: $e');
-                                            }
-                                          } else {
-                                            toggleBottomPanel();
-                                          }
-                                        }
-                                      : toggleBottomPanel,
-                                  child: Container(
-                                    padding: EdgeInsets.symmetric(horizontal: 2, vertical: 2),
-                                    decoration: BoxDecoration(
-                                      color: const Color.fromARGB(255, 218, 87, 87),
-                                      borderRadius: BorderRadius.circular(20),
-                                      ),
-                                    child: widget.roleLabel == 'TSUPERHERO'
-                                        ? Text(
-                                              ' GO OFFLINE ',
-                                            style: TextStyle(
-                                              height: 1,
-                                              fontSize: 10,
-                                              fontWeight: FontWeight.bold,
-                                              color: Colors.white,
-                                            ),
-                                          )
-                                        :
-                                    Icon(Icons.close, size: 14,color: const Color.fromARGB(255, 39, 38, 38),
-                                    weight: 500,
-                                    ),
-                                  ),
-                                ),
-                                
-                                const SizedBox(width: 8),
-                              ],
-                            ),
-                            // Reuse role menu items inside bottom panel
-                            ...widget.roleActions,
-                          ],
-                        ),
-                      
-                    ),
-                  ],
-                ),
-              ),
-            ),
+        Positioned(
+          bottom: 0,
+          left: 0,
+          right: 0,
+          child: widget.roleContentBuilder(
+            context,
+            _displayName,
+            _currentUserLoc,
           ),
         ),
 
@@ -1610,7 +989,7 @@ class _SharedHomeState extends State<SharedHome> with TickerProviderStateMixin {
               const Color.fromARGB(255, 4, 3, 5),
               const Color.fromARGB(255, 62, 60, 68),
             ],),
-            color: Colors.black.withOpacity(0.9),
+            color: Colors.black.withOpacity(0.98),
           borderRadius: const BorderRadius.only(
             topRight: Radius.circular(35),
             bottomRight: Radius.circular(35),
@@ -1624,7 +1003,14 @@ class _SharedHomeState extends State<SharedHome> with TickerProviderStateMixin {
           child: Column(
             children: [
               GestureDetector(
-                onTap: () => _openRoleDashboard(),
+                onTap: () {
+                  Navigator.push(
+                    context,
+                    MaterialPageRoute(
+                      builder: (_) => PHDashboard(displayName: _displayName),
+                    ),
+                  );
+                },
                 child: Container(
                   decoration: BoxDecoration(
                     gradient: LinearGradient(
@@ -1699,10 +1085,8 @@ class _SharedHomeState extends State<SharedHome> with TickerProviderStateMixin {
                           children: [
                             Text(
                               _displayName,
-                              style: TextStyle(
-                                height: 1,
-                                fontFamily: GoogleFonts.roboto().fontFamily,
-                                fontWeight: FontWeight.w900,
+                              style: const TextStyle(
+                                fontWeight: FontWeight.bold,
                                 fontSize: 16,
                                 color: Colors.white
                               ),
@@ -1711,17 +1095,8 @@ class _SharedHomeState extends State<SharedHome> with TickerProviderStateMixin {
                             Text(
                               widget.roleLabel,
                               style: const TextStyle(
-                                height: 1,
                                 color: Color.fromARGB(255, 255, 255, 255),
                                 fontSize: 11,
-                            ),
-                          ),
-                          Text(
-                              'PROFILE •••',
-                              style: const TextStyle(
-                                height: 2,
-                                color: Color.fromARGB(255, 172, 172, 172),
-                                fontSize: 8.5,
                             ),
                           ),
                         ],
@@ -1804,12 +1179,6 @@ class _SharedHomeState extends State<SharedHome> with TickerProviderStateMixin {
     );  
   }
 
-  // ignore: strict_top_level_inference
-  
-        
-        
-      
-  
   // Add missing variable declaration
   BitmapDescriptor? _userDirectionalIcon;
 }

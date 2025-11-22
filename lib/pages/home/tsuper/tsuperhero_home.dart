@@ -4,6 +4,7 @@ import 'package:firebase_auth/firebase_auth.dart';
 import 'package:cloud_firestore/cloud_firestore.dart';
 import 'package:firebase_database/firebase_database.dart';
 import 'package:google_maps_flutter/google_maps_flutter.dart';
+import 'package:flutter_polyline_points/flutter_polyline_points.dart';
 import 'package:para2/pages/login/login.dart';
 import 'package:para2/pages/home/shared_home.dart';
 import 'package:para2/pages/login/qr_scan_page.dart';
@@ -12,6 +13,8 @@ import 'dart:math' as math;
 import 'package:para2/services/ui_utils.dart';
 import 'package:para2/services/button_actions.dart';
 import 'package:para2/services/map_theme_service.dart';
+import 'package:para2/services/follow_service.dart';
+import 'package:para2/services/route_utils.dart';
 import 'package:para2/theme/app_icons.dart';
 import 'package:para2/pages/settings/profile_settings.dart';
 import 'package:para2/pages/biyahe/biyahe_logs_page.dart';
@@ -33,8 +36,35 @@ class _TsuperheroHomeState extends State<TsuperheroHome> {
   final RealtimeDatabaseService _rtdbService = RealtimeDatabaseService();
 
   StreamSubscription? _trackerSub;
+  StreamSubscription<QuerySnapshot>? _paraSub;
   Marker? _jeepMarker;
   bool _hasCentered = false;
+  // Track which passenger markers we've added so we can remove them when out of range
+  final Set<String> _visiblePassengerIds = {};
+
+  // Driver route points and polylines
+  List<LatLng>? _routePoints;
+  final Set<Polyline> _routePolylines = {};
+  late final PolylinePoints _polylinePoints;
+  // Google API key (reused from pasahero_home.dart)
+  static const String _googleApiKey = 'AIzaSyCb4q7iicIT4TD8qjPQxHtlxYn4tEj4WOY';
+  // Index of the next route point the jeep should head to (used for active segment)
+  int _nextRoutePointIndex = 0;
+  // How many downstream route vertices to include in the active segment
+  // beyond the immediate next point. Increase to show more of the upcoming
+  // route in the green active polyline.
+  int _activeSegmentLookahead = 3;
+  // Connector cache: a road-following sub-route from the jeep position to
+  // a point on the route. We request this from Directions sparingly and
+  // cache the result to avoid repeated API calls on frequent GPS updates.
+  List<LatLng>? _activeConnector;
+  LatLng? _lastConnectorOrigin;
+  LatLng? _lastConnectorTarget;
+  DateTime? _lastConnectorTime;
+  // Minimum time between connector requests (ms)
+  int _connectorCooldownMs = 8000;
+  // Minimum movement (meters) required to force a new connector request
+  double _connectorMoveThreshold = 20.0;
 
   String _plateNumber = 'DRVR-XXX';
   bool _isOnline = false;
@@ -48,17 +78,39 @@ class _TsuperheroHomeState extends State<TsuperheroHome> {
   // Driver actions state
   bool _showRouteMenu = false;
   String _selectedRoute = '';
-  final List<String> _presetRoutes = [
-    'Plaridel Crossing ↔ Malolos Crossing',
-    'Downtown Loop',
-    'Market District ↔ Station',
-  ];
+  // The route the driver has confirmed/published (saved to users/{uid}/currentRoute)
+  String? _currentRouteSaved;
+  // Will be populated from Firestore `jeepney_routes` collection at runtime
+  final List<String> _presetRoutes = [];
+  // The BuildContext provided by SharedHome's roleContentBuilder (descendant)
+  BuildContext? _sharedHomeContext;
+  // A GlobalKey attached to the SharedHome so the parent can access its state
+  final GlobalKey _sharedHomeKey = GlobalKey();
+
+  // Helper to resolve the SharedHome state. Prefer the captured descendant
+  // context (when the roleContentBuilder has been built); fall back to the
+  // GlobalKey's currentState so calls made before the child builds still
+  // reach the SharedHome instance once it's available.
+  dynamic _getSharedHomeState() {
+    try {
+      if (_sharedHomeContext != null) return SharedHome.of(_sharedHomeContext!);
+    } catch (_) {}
+    try {
+      return _sharedHomeKey.currentState as dynamic?;
+    } catch (_) {
+      return null;
+    }
+  }
 
   @override
   void initState() {
     super.initState();
+    _polylinePoints = PolylinePoints();
     _initDriverData();
     _loadUserDisplayName();
+    // Populate available routes from Firestore so the driver can choose any route
+    _loadAllRoutes();
+    _subscribePassengerRequests();
   }
 
   Future<void> _initDriverData() async {
@@ -81,6 +133,15 @@ class _TsuperheroHomeState extends State<TsuperheroHome> {
         if (boxDoc.exists) {
           _trackerId = boxDoc.data()?['trackerId'];
         }
+      }
+
+      // If the user document contains a saved/assigned route name, load it
+      // automatically so the driver sees their official route immediately.
+      final savedRoute = (data['currentRoute'] as String?) ?? (data['selectedRoute'] as String?) ?? (data['route'] as String?) ?? (data['assignedRoute'] as String?);
+      if (savedRoute != null && savedRoute.isNotEmpty) {
+        _selectedRoute = savedRoute;
+        // Fire-and-forget: display route polyline (no need to block init)
+        _loadRoutePointsForName(savedRoute);
       }
 
       // Load current passenger count from RTDB
@@ -164,17 +225,344 @@ class _TsuperheroHomeState extends State<TsuperheroHome> {
 
       setState(() => _jeepMarker = marker);
 
-      final sharedHome = SharedHome.of(context);
+      final sharedHome = _getSharedHomeState();
       if (sharedHome != null) {
         sharedHome.addOrUpdateMarker(const MarkerId('tsuperhero_jeep'), marker);
-        if (!_hasCentered) {
-          await sharedHome.centerMap(pos);
+        // Remove the phone user marker for drivers so the map focuses on the box
+        sharedHome.removeMarker(const MarkerId('user_marker'));
+        // Also remove the duplicate device marker (created by SharedHome's
+        // RTDB devices subscription) so we don't show two jeep markers for
+        // the same tracker. The device marker uses id `jeep_<trackerId>`.
+        try {
+          sharedHome.removeJeepMarker(trackerId);
+        } catch (e) {
+          debugPrint('Could not remove duplicate jeep marker: $e');
+        }
+
+        // If follow mode is enabled, center on the jeep (tracker) instead of phone
+        if (FollowService.instance.isFollowing.value) {
+          try {
+            await sharedHome.centerMap(pos);
+          } catch (e) {
+            debugPrint('Error centering on tracker while following: $e');
+          }
+        } else if (!_hasCentered) {
+          // Initial center when tracker first appears
+              await sharedHome.centerMap(pos);
           _hasCentered = true;
         }
+        // Update active route segment based on current jeep position
+            try {
+              await _updateActiveSegment(pos);
+            } catch (e) {
+              debugPrint('Error updating active route segment: $e');
+            }
       }
 
       debugPrint("📍 Jeep updated: ($lat, $lng) - Online: $_isOnline - Passengers: $_currentPassengers/$_maxCapacity");
     });
+  }
+
+  // Haversine distance in meters
+  double _distanceMeters(LatLng a, LatLng b) {
+    const R = 6371000.0; // meters
+    final lat1 = a.latitude * (math.pi / 180.0);
+    final lat2 = b.latitude * (math.pi / 180.0);
+    final dLat = (b.latitude - a.latitude) * (math.pi / 180.0);
+    final dLon = (b.longitude - a.longitude) * (math.pi / 180.0);
+    final sinDlat = math.sin(dLat / 2);
+    final sinDlon = math.sin(dLon / 2);
+    final h = sinDlat * sinDlat + math.cos(lat1) * math.cos(lat2) * sinDlon * sinDlon;
+    final c = 2 * math.atan2(math.sqrt(h), math.sqrt(1 - h));
+    return R * c;
+  }
+
+  // Compute the closest point on segment AB to point P (returns LatLng).
+  // Works in latitude/longitude space; accurate enough for short distances.
+  LatLng _closestPointOnSegment(LatLng a, LatLng b, LatLng p) {
+    final double ax = a.latitude;
+    final double ay = a.longitude;
+    final double bx = b.latitude;
+    final double by = b.longitude;
+    final double px = p.latitude;
+    final double py = p.longitude;
+
+    final double vx = bx - ax;
+    final double vy = by - ay;
+    final double wx = px - ax;
+    final double wy = py - ay;
+
+    final double denom = vx * vx + vy * vy;
+    if (denom == 0) return a;
+
+    double t = (vx * wx + vy * wy) / denom;
+    if (t < 0) t = 0;
+    if (t > 1) t = 1;
+
+    return LatLng(ax + vx * t, ay + vy * t);
+  }
+
+  // Build (or reuse) a road-following connector from origin -> target
+  // using the Directions API. This function caches the last connector and
+  // respects a cooldown to avoid excessive API calls on frequent updates.
+  Future<List<LatLng>?> _buildConnectorIfNeeded(LatLng origin, LatLng target) async {
+    try {
+      final now = DateTime.now();
+      // Reuse cached connector if origin/target are close to previous ones
+      if (_activeConnector != null && _lastConnectorOrigin != null && _lastConnectorTarget != null && _lastConnectorTime != null) {
+        final dOrigin = _distanceMeters(origin, _lastConnectorOrigin!);
+        final dTarget = _distanceMeters(target, _lastConnectorTarget!);
+        final dt = now.difference(_lastConnectorTime!).inMilliseconds;
+        if (dOrigin <= _connectorMoveThreshold && dTarget <= 10.0 && dt <= _connectorCooldownMs) {
+          return _activeConnector;
+        }
+      }
+
+      // Too many Directions calls can be expensive; guard by cooldown.
+      if (_lastConnectorTime != null) {
+        final dt = now.difference(_lastConnectorTime!).inMilliseconds;
+        if (dt < _connectorCooldownMs) {
+          // If we've recently asked and nothing changed much, reuse cached
+          // connector even if origin moved slightly.
+          if (_activeConnector != null) return _activeConnector;
+        }
+      }
+
+      // Issue a single Directions call from origin -> target and decode
+      final result = await _polylinePoints.getRouteBetweenCoordinates(
+        googleApiKey: _googleApiKey,
+        request: PolylineRequest(
+          origin: PointLatLng(origin.latitude, origin.longitude),
+          destination: PointLatLng(target.latitude, target.longitude),
+          mode: TravelMode.driving,
+          avoidHighways: false,
+          avoidTolls: false,
+        ),
+      );
+
+      if (result.points.isEmpty) {
+        debugPrint('Tsuper: connector directions returned no points');
+        return null;
+      }
+
+      final conn = result.points.map((p) => LatLng(p.latitude, p.longitude)).toList();
+      _activeConnector = conn;
+      _lastConnectorOrigin = origin;
+      _lastConnectorTarget = target;
+      _lastConnectorTime = now;
+      debugPrint('Tsuper: built connector with ${conn.length} points');
+      return conn;
+    } catch (e) {
+      debugPrint('Tsuper: error building connector: $e');
+      return null;
+    }
+  }
+
+  /// Build a road-following route by requesting Directions between each
+  /// Build a road-following route by requesting Directions for larger
+  /// segments (chunked) to reduce detours and API calls. This attempts to
+  /// follow roads between the provided vertices while avoiding issuing a
+  /// Directions call for every adjacent pair (which can produce detours on
+  /// sparse vertex lists). Falls back to raw vertices if any lookup fails.
+  Future<List<LatLng>> _buildDriverRouteFromPoints(List<LatLng> pts) async {
+    if (pts.length < 2) return pts;
+    final List<LatLng> assembled = [];
+    // Choose chunk size to limit waypoint complexity and API calls. 6-10 is a
+    // reasonable tradeoff for mid-length routes; adjust if needed.
+    const int chunkSize = 8;
+    try {
+      for (int start = 0; start < pts.length - 1; start += chunkSize) {
+        final end = (start + chunkSize < pts.length - 1) ? start + chunkSize : pts.length - 1;
+        final a = pts[start];
+        final b = pts[end];
+
+        // Request a driving route between a and b. If the result is empty,
+        // fallback to inserting raw intermediate vertices from start..end.
+        final result = await _polylinePoints.getRouteBetweenCoordinates(
+          googleApiKey: _googleApiKey,
+          request: PolylineRequest(
+            origin: PointLatLng(a.latitude, a.longitude),
+            destination: PointLatLng(b.latitude, b.longitude),
+            mode: TravelMode.driving,
+            avoidHighways: false,
+            avoidTolls: false,
+          ),
+        );
+
+        if (result.points.isNotEmpty) {
+          for (final p in result.points) {
+            final latlng = LatLng(p.latitude, p.longitude);
+            if (assembled.isEmpty || assembled.last.latitude != latlng.latitude || assembled.last.longitude != latlng.longitude) {
+              assembled.add(latlng);
+            }
+          }
+        } else {
+          // Insert raw vertices for this chunk if Directions returned nothing
+          for (int k = start; k <= end; k++) {
+            final v = pts[k];
+            if (assembled.isEmpty || assembled.last.latitude != v.latitude || assembled.last.longitude != v.longitude) {
+              assembled.add(v);
+            }
+          }
+        }
+      }
+      return assembled;
+    } catch (e) {
+      debugPrint('Tsuper: failed to build driver route via Directions API: $e');
+      return pts;
+    }
+  }
+
+  /// Update the small active polyline segment from the jeep's current
+  /// position to the next route point ahead. Only this segment is updated
+  /// frequently; the full route stays in `_routePolylines` as `driverRoute`.
+  Future<void> _updateActiveSegment(LatLng jeepPos) async {
+    if (_routePoints == null || _routePoints!.isEmpty) return;
+
+    // Find nearest route index
+    int nearestIdx = 0;
+    double best = double.infinity;
+    for (int i = 0; i < _routePoints!.length; i++) {
+      final d = _distanceMeters(jeepPos, _routePoints![i]);
+      if (d < best) {
+        best = d;
+        nearestIdx = i;
+      }
+    }
+
+    // Candidate next point is the next index after the nearest
+    int candidateNext = nearestIdx + 1;
+
+    // If we're at or beyond the last point, remove any active segment
+    if (candidateNext >= _routePoints!.length) {
+      _routePolylines.removeWhere((p) => p.polylineId.value == 'active_segment');
+      debugPrint('Tsuper: reached end of route, removed active segment');
+      _nextRoutePointIndex = _routePoints!.length - 1;
+    } else {
+      final nextPt = _routePoints![candidateNext];
+
+      // If we're very close to the next point, treat it as reached: remove highlight
+      const double reachThreshold = 10.0; // meters
+      final distToNext = _distanceMeters(jeepPos, nextPt);
+      if (distToNext <= reachThreshold) {
+        // Advance next index so next active segment picks the following point
+        _nextRoutePointIndex = candidateNext;
+        _routePolylines.removeWhere((p) => p.polylineId.value == 'active_segment');
+        debugPrint('Tsuper: reached route point $candidateNext (dist=${distToNext.toStringAsFixed(1)}m) — clearing active highlight');
+      } else {
+        // Build an active segment that follows the road: project the jeep
+        // position onto the nearest route segment and use the route geometry
+        // between that projection and the next route point.
+        LatLng proj = jeepPos;
+        int projSegIndex = nearestIdx;
+        try {
+          // Find the nearest route segment (not just nearest vertex) and project
+          // the jeep position onto that segment so the active line follows
+          // the actual route geometry.
+          double bestSegDist = double.infinity;
+          for (int s = 0; s < _routePoints!.length - 1; s++) {
+            final a = _routePoints![s];
+            final b = _routePoints![s + 1];
+            final cand = _closestPointOnSegment(a, b, jeepPos);
+            final d = _distanceMeters(jeepPos, cand);
+            if (d < bestSegDist) {
+              bestSegDist = d;
+              proj = cand;
+              projSegIndex = s;
+            }
+          }
+        } catch (e) {
+          debugPrint('Tsuper: projection over segments failed, using raw jeepPos: $e');
+          proj = jeepPos;
+          projSegIndex = nearestIdx;
+        }
+
+        // Collect route geometry from the jeep marker position to the next
+        // route point so the active segment visually connects to the marker.
+        final List<LatLng> seg = [];
+        // Try to build/ reuse a road-following connector from jeep -> proj
+        // so the line follows streets instead of drawing a straight line.
+        List<LatLng>? connector;
+        try {
+          connector = await _buildConnectorIfNeeded(jeepPos, proj);
+        } catch (e) {
+          debugPrint('Tsuper: connector build failed: $e');
+          connector = null;
+        }
+
+        if (connector != null && connector.isNotEmpty) {
+          // Start the segment with the connector (already begins at jeepPos)
+          seg.addAll(connector);
+          // Ensure the connector ends at or near the projection; if not, append proj
+          final last = seg.last;
+          if (_distanceMeters(last, proj) > 3.0) seg.add(proj);
+        } else {
+          // Fallback: start directly from jeepPos and include projection
+          seg.add(jeepPos);
+          final double projDist = _distanceMeters(jeepPos, proj);
+          if (projDist > 1.0) seg.add(proj);
+        }
+
+        final from = projSegIndex + 1;
+        final to = math.min(candidateNext + _activeSegmentLookahead, _routePoints!.length - 1);
+        if (from <= to) {
+          seg.addAll(_routePoints!.sublist(from, to + 1));
+        } else {
+          seg.add(nextPt);
+        }
+
+        final active = Polyline(
+          polylineId: const PolylineId('active_segment'),
+          points: seg,
+          color: const Color.fromARGB(144, 41, 182, 192),
+          width: 6,
+        );
+
+        // Replace any existing active segment
+        _routePolylines.removeWhere((p) => p.polylineId.value == 'active_segment');
+        _routePolylines.add(active);
+        _nextRoutePointIndex = candidateNext;
+        debugPrint('Tsuper: active segment (road-following) to point $candidateNext (dist=${distToNext.toStringAsFixed(1)}m)');
+        // Publish the active segment to Firestore for pasahero clients to read.
+        try {
+          if (_isOnline) {
+            final user = _auth.currentUser;
+            if (user != null) {
+              final routeName = (_currentRouteSaved != null && _currentRouteSaved!.isNotEmpty) ? _currentRouteSaved! : _selectedRoute;
+              if (routeName.isNotEmpty) {
+                final routeDoc = _routeDocIdFromName(routeName);
+                final docRef = _firestore.collection('active_routes').doc(routeDoc).collection('drivers').doc(user.uid);
+                final segPayload = seg.map((p) => {'lat': p.latitude, 'lng': p.longitude}).toList();
+                await docRef.set({'active_segment': segPayload, 'updatedAt': FieldValue.serverTimestamp()}, SetOptions(merge: true));
+              }
+            }
+          }
+        } catch (e) {
+          debugPrint('Tsuper: failed to publish active_segment to Firestore: $e');
+        }
+      }
+    }
+
+    // Ensure the full driver route polyline remains in the set (id: driverRoute)
+    final hasDriverRoute = _routePolylines.any((p) => p.polylineId.value == 'driverRoute');
+    if (!hasDriverRoute && _routePoints != null && _routePoints!.isNotEmpty) {
+      _routePolylines.add(Polyline(polylineId: const PolylineId('driverRoute'), points: _routePoints!, color: Colors.orangeAccent, width: 5));
+    }
+
+    // Push updated external polylines to SharedHome so they render on the map
+    // Only push when the driver is online; when offline we must not display
+    // live/active segments to other users.
+    final shared = _getSharedHomeState();
+    try {
+      if (_isOnline) {
+        shared?.setExternalPolylines(_routePolylines);
+        debugPrint('Tsuper: updated active segment (nextIdx=$_nextRoutePointIndex)');
+      } else {
+        debugPrint('Tsuper: offline - suppressed pushing external polylines');
+      }
+    } catch (e) {
+      debugPrint('Error pushing external polylines to SharedHome: $e');
+    }
   }
 
   // Manual passenger counter methods
@@ -342,8 +730,35 @@ class _TsuperheroHomeState extends State<TsuperheroHome> {
           });
         }
       }
+      final sharedHome = _getSharedHomeState();
 
-      SnackbarService.show(context, _isOnline ? '🟢 You are now ONLINE - Visible to passengers' : '🔴 You are now OFFLINE', duration: const Duration(seconds: 2));
+      if (_isOnline) {
+        // SharedHome will open the bottom panel when it receives the
+        // updated `isDriverOnline` flag from this widget. Do not toggle
+        // the panel directly here to avoid races and double-toggles.
+        // Ensure the SharedHome displays this driver's polylines while online.
+        try {
+          sharedHome?.clearExternalPolylines();
+          if (_routePolylines.isNotEmpty) sharedHome?.setExternalPolylines(_routePolylines);
+        } catch (_) {}
+        // If a route is already selected and confirmed, publish it so pasaheros can see it
+        if (_currentRouteSaved != null && _currentRouteSaved!.isNotEmpty) {
+          await _publishActiveRoute(_currentRouteSaved!);
+        }
+        SnackbarService.show(context, '🟢 You are now ONLINE - Visible to passengers', duration: const Duration(seconds: 2));
+      } else {
+        // Going offline: remove any online-only map data (published route)
+        if (user != null) {
+          await _removeActiveRouteForUser(user.uid);
+        }
+        // Going offline: clear any external polylines so other users won't
+        // see live/active segments for this driver. Do NOT re-add route
+        // polylines — per design polylines are only visible while online.
+        try {
+          sharedHome?.clearExternalPolylines();
+        } catch (_) {}
+        SnackbarService.show(context, '🔴 You are now OFFLINE', duration: const Duration(seconds: 2));
+      }
     } catch (e) {
       debugPrint('Error updating online status: $e');
     }
@@ -352,22 +767,342 @@ class _TsuperheroHomeState extends State<TsuperheroHome> {
   @override
   void dispose() {
     _trackerSub?.cancel();
+    _paraSub?.cancel();
     super.dispose();
+  }
+
+  void _subscribePassengerRequests() {
+    _paraSub?.cancel();
+    _paraSub = FirebaseFirestore.instance
+        .collection('para_requests')
+        .where('status', whereIn: ['pending', 'active'])
+        .snapshots()
+        .listen((snapshot) {
+      final sharedHome = _getSharedHomeState();
+      if (sharedHome == null) return;
+
+      final currentlyVisible = <String>{};
+
+      for (final doc in snapshot.docs) {
+        final raw = doc.data();
+        final data = Map<String, dynamic>.from(raw as Map);
+        if (data['passengerLocation'] == null) continue;
+        final gp = data['passengerLocation'] as GeoPoint;
+        final pLoc = LatLng(gp.latitude, gp.longitude);
+
+        bool shouldShow = false;
+
+        // If we have the jeep tracker position, show passengers within a radius
+        if (_jeepMarker != null) {
+          final distKm = _distanceKm(pLoc, _jeepMarker!.position);
+          if (distKm <= 3.0) {
+            shouldShow = true;
+          }
+        }
+
+        // If the passenger document contains route points and the driver has a route,
+        // check for route overlap. (This requires both sides to provide route arrays.)
+        // (Optional) If the passenger document contains route points and the driver
+        // has a route, you could check for route overlap using `findLastOverlappingNode`.
+        // That logic is left as a hook for when driver route polylines/points are available.
+
+        final pid = doc.id;
+        // If driver has route points, attempt route overlap check with passenger route
+        if (!shouldShow && _routePoints != null && data['routePoints'] != null) {
+            try {
+              final List<dynamic> rp = data['routePoints'];
+              final passengerRoute = rp.map((e) {
+                if (e is GeoPoint) return LatLng(e.latitude, e.longitude);
+                if (e is Map && e['lat'] != null && e['lng'] != null) return LatLng((e['lat'] as num).toDouble(), (e['lng'] as num).toDouble());
+                return null;
+              }).whereType<LatLng>().toList();
+
+              final overlap = findLastOverlappingNode(_routePoints!, passengerRoute, toleranceMeters: 25.0);
+              if (overlap != null) {
+                shouldShow = true;
+              }
+            } catch (_) {}
+        }
+
+        if (shouldShow) {
+          currentlyVisible.add(pid);
+          final marker = Marker(
+            markerId: MarkerId('pasahero_$pid'),
+            position: pLoc,
+            infoWindow: InfoWindow(title: data['passengerName'] ?? 'Passenger'),
+            icon: BitmapDescriptor.defaultMarkerWithHue(BitmapDescriptor.hueAzure),
+          );
+          sharedHome.addOrUpdateMarker(MarkerId('pasahero_$pid'), marker);
+        }
+      }
+
+      // Remove any previously visible passenger markers that are no longer in range
+      final toRemove = _visiblePassengerIds.difference(currentlyVisible);
+      for (final pid in toRemove) {
+        sharedHome.removeMarker(MarkerId('pasahero_$pid'));
+      }
+
+      _visiblePassengerIds
+        ..clear()
+        ..addAll(currentlyVisible);
+    }, onError: (e) {
+      debugPrint('para_requests subscription error: $e');
+    });
+  }
+
+  /// Load route points for a named route from Firestore collection `jeepney_routes`.
+  /// The `name` should match the document `displayName` field or the document id.
+  Future<void> _loadRoutePointsForName(String name) async {
+    try {
+      // Try to find by displayName first
+      final q = await _firestore.collection('jeepney_routes').where('displayName', isEqualTo: name).limit(1).get();
+      DocumentSnapshot? doc;
+      if (q.docs.isNotEmpty) {
+        doc = q.docs.first;
+      } else {
+        // Fallback: try document id
+        final alt = await _firestore.collection('jeepney_routes').doc(name).get();
+        if (alt.exists) doc = alt;
+      }
+
+      if (doc == null || !doc.exists) {
+        debugPrint('Route not found for name: $name');
+        return;
+      }
+
+      final data = doc.data() as Map<String, dynamic>?;
+      if (data == null) return;
+
+      final rawPoints = data['points'];
+      if (rawPoints == null || rawPoints is! List) return;
+
+      final pts = <LatLng>[];
+      for (final p in rawPoints) {
+        if (p == null) continue;
+        if (p is GeoPoint) {
+          pts.add(LatLng(p.latitude, p.longitude));
+        } else if (p is Map) {
+          final lat = (p['lat'] as num?)?.toDouble();
+          final lng = (p['lng'] as num?)?.toDouble();
+          if (lat != null && lng != null) pts.add(LatLng(lat, lng));
+        }
+      }
+
+      if (pts.isEmpty) {
+        debugPrint('No route points found for route: $name');
+        return;
+      }
+
+      // Attempt to build a road-following route (using Directions API in
+      // chunked segments). If the builder fails we fall back to raw
+      // Firestore vertices so the driver still sees a valid route.
+      List<LatLng> finalRoutePoints = pts;
+      try {
+        final built = await _buildDriverRouteFromPoints(pts);
+        if (built.isNotEmpty) {
+          finalRoutePoints = built;
+        }
+        debugPrint('Tsuper: built driver route (${finalRoutePoints.length} pts) from original ${pts.length} vertices');
+      } catch (e) {
+        debugPrint('Tsuper: directions-based build failed, using raw points: $e');
+        finalRoutePoints = pts;
+      }
+
+      setState(() {
+        _routePoints = finalRoutePoints;
+        _routePolylines
+          ..clear()
+          ..add(Polyline(
+            polylineId: const PolylineId('driverRoute'),
+            color: const Color.fromARGB(255, 90, 10, 165),
+            width: 5,
+            points: finalRoutePoints,
+          ));
+      });
+
+      // Push to SharedHome (clear previous external polylines first)
+      final shared = _getSharedHomeState();
+      shared?.clearExternalPolylines();
+      // Only expose external polylines when the driver is online.
+      if (_isOnline) {
+        shared?.setExternalPolylines(_routePolylines);
+      }
+      debugPrint('Loaded route points for $name (${pts.length} points)');
+    } catch (e) {
+      debugPrint('Error loading route points for $name: $e');
+    }
+  }
+
+  /// Load all routes available in Firestore `jeepney_routes` collection and
+  /// populate `_presetRoutes` with `displayName` (fallback to doc id).
+  Future<void> _loadAllRoutes() async {
+    try {
+      final q = await _firestore.collection('jeepney_routes').get();
+      final routes = <String>[];
+      for (final doc in q.docs) {
+        final data = doc.data() as Map<String, dynamic>?;
+        final display = (data != null && data['displayName'] is String) ? (data['displayName'] as String).trim() : null;
+        if (display != null && display.isNotEmpty) {
+          routes.add(display);
+        } else {
+          routes.add(doc.id);
+        }
+      }
+      setState(() {
+        _presetRoutes
+          ..clear()
+          ..addAll(routes);
+      });
+      debugPrint('Loaded ${routes.length} routes from jeepney_routes');
+    } catch (e) {
+      debugPrint('Error loading all routes: $e');
+    }
+  }
+
+  /// Publish the driver's active route to Firestore so other users (pasahero)
+  /// can see it. Stored in `active_routes/{driverUid}` with a `routeName` and
+  /// `points` array of {lat,lng} maps.
+  Future<void> _publishActiveRoute(String routeName) async {
+    try {
+      final user = _auth.currentUser;
+      if (user == null) return;
+
+      // Ensure we have route points loaded locally; if not, load them first
+      if (_routePoints == null || _routePoints!.isEmpty) {
+        await _loadRoutePointsForName(routeName);
+      }
+
+      if (_routePoints == null || _routePoints!.isEmpty) {
+        debugPrint('No route points to publish for $routeName');
+        return;
+      }
+
+      final pointsPayload = _routePoints!.map((p) => {'lat': p.latitude, 'lng': p.longitude}).toList();
+
+      // If a different route was previously published by this driver, remove
+      // that previous publication before publishing the new one so we don't
+      // leave stale docs under the old active_routes/{route}/drivers/{uid}.
+      try {
+        final previous = (_currentRouteSaved != null && _currentRouteSaved!.isNotEmpty) ? _currentRouteSaved! : null;
+        if (previous != null && previous != routeName) {
+          await _removeActiveRouteForUser(user.uid, routeName: previous);
+        }
+      } catch (e) {
+        debugPrint('Tsuper: failed to remove previous active route: $e');
+      }
+
+      // Save currentRoute to users doc (always save so driver preferences persist)
+      await _firestore.collection('users').doc(user.uid).update({'currentRoute': routeName});
+      // Only publish an active route for others to see if the driver is online.
+      // New structure: active_routes/{routeDoc}/drivers/{uid} => { driverId, routeName, points, updatedAt }
+        if (_isOnline) {
+          final routeDoc = _routeDocIdFromName(routeName);
+          final docRef = _firestore.collection('active_routes').doc(routeDoc).collection('drivers').doc(user.uid);
+          await docRef.set({
+            'driverId': user.uid,
+            'routeName': routeName,
+            'driverRoute': pointsPayload,
+            'routePoints': pointsPayload,
+            'updatedAt': FieldValue.serverTimestamp(),
+          });
+          debugPrint('Published active route for user ${user.uid} under $routeDoc');
+        } else {
+        // Inform the driver that the route was saved locally but not published
+        // because the driver is currently offline. Publishing will occur when
+        // the driver toggles online (handled by _toggleOnlineStatus) or
+        // you can opt to publish immediately even while offline.
+        SnackbarService.show(context, 'Route saved locally. Go ONLINE to publish it to passengers.', duration: const Duration(seconds: 3));
+        debugPrint('Driver ${user.uid} saved currentRoute "$routeName" but not published because _isOnline=false');
+      }
+
+      setState(() {
+        _currentRouteSaved = routeName;
+      });
+
+      debugPrint('Saved current route for driver ${user.uid}: $routeName (published=${_isOnline})');
+    } catch (e) {
+      debugPrint('Error publishing active route: $e');
+    }
+  }
+
+  /// Remove the active route document for the driver (used when going offline)
+  Future<void> _removeActiveRouteForUser(String uid, {String? routeName}) async {
+    try {
+      // Determine which route doc to remove the driver's document from.
+      final routeToUse = (routeName != null && routeName.isNotEmpty)
+          ? routeName
+          : ((_currentRouteSaved != null && _currentRouteSaved!.isNotEmpty) ? _currentRouteSaved! : _selectedRoute);
+      if (routeToUse.isEmpty) {
+        debugPrint('No route known to remove for user $uid');
+        return;
+      }
+      final routeDoc = _routeDocIdFromName(routeToUse);
+      final driverDocRef = _firestore.collection('active_routes').doc(routeDoc).collection('drivers').doc(uid);
+      final driverDoc = await driverDocRef.get();
+      if (driverDoc.exists) {
+        await driverDocRef.delete();
+        debugPrint('Removed active route driver doc for $uid under route $routeDoc');
+      }
+      // If no drivers remain under this route, remove the empty route document
+      final remaining = await _firestore.collection('active_routes').doc(routeDoc).collection('drivers').limit(1).get();
+      if (remaining.docs.isEmpty) {
+        try {
+          await _firestore.collection('active_routes').doc(routeDoc).delete();
+          debugPrint('Deleted empty active route document $routeDoc');
+        } catch (_) {}
+      }
+      // Do NOT delete users/{uid}.currentRoute here — keep the driver's
+      // selected/currentRoute persisted so they can continue to see it.
+    } catch (e) {
+      debugPrint('Error removing active route for $uid: $e');
+    }
+  }
+
+  String _routeDocIdFromName(String name) {
+    // Basic sanitization for Firestore doc id: remove slashes and trim
+    var id = name.replaceAll('/', '_');
+    id = id.replaceAll('\u200b', ''); // strip zero-width
+    id = id.trim();
+    if (id.isEmpty) id = 'route_${DateTime.now().millisecondsSinceEpoch}';
+    return id;
   }
 
   @override
   Widget build(BuildContext context) {
     return SharedHome(
+      key: _sharedHomeKey,
       roleLabel: 'TSUPERHERO',
       onSignOut: _handleSignOut,
       roleMenu: _buildDriverMenu(),
       roleActions: _buildDriverActions(),
-      roleContentBuilder: (context, role, userLoc, onMapTap) =>
-          _buildDriverContent(),
+      // Provide SharedHome with a callback so its bottom panel can toggle online
+      // state on behalf of the driver (when the close button is tapped).
+      onDriverToggleOnline: _toggleOnlineStatus,
+      isDriverOnline: _isOnline,
+      roleContentBuilder: (context, role, userLoc, onMapTap) => _buildDriverContent(context, role, userLoc, onMapTap),
+      centerAction: Builder(builder: (context) {
+        return ElevatedButton.icon(
+          onPressed: () async {
+            await _toggleOnlineStatus();
+            // SharedHome will open/close the bottom panel based on the
+            // `isDriverOnline` property passed into it; do not toggle here.
+          },
+          style: ElevatedButton.styleFrom(
+            elevation: 8,
+            backgroundColor: _isOnline ? Colors.green : Colors.grey,
+            padding: const EdgeInsets.symmetric(horizontal: 24, vertical: 12),
+            shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(24)),
+          ),
+          icon: Icon(_isOnline ? Icons.power_settings_new : Icons.play_arrow, color: Colors.white),
+          label: Text(_isOnline ? 'Go Offline' : 'Go Online', style: const TextStyle(color: Colors.white, fontSize: 15)),
+        );
+      }),
     );
   }
 
-  Widget _buildDriverContent() {
+  Widget _buildDriverContent(BuildContext sharedContext, String? role, LatLng? userLoc, void Function(LatLng)? onMapTap) {
+    // Capture the descendant context so async callbacks can call SharedHome.of(...)
+    _sharedHomeContext = sharedContext;
     return Column(
       mainAxisAlignment: MainAxisAlignment.center,
       children: [
@@ -498,8 +1233,8 @@ class _TsuperheroHomeState extends State<TsuperheroHome> {
               style: ElevatedButton.styleFrom(
                 elevation: 7,
                 backgroundColor: _isOnline
-                    ? Colors.red
-                    : const Color.fromARGB(255, 35, 34, 37),
+                    ? Colors.green
+                    : Colors.grey,
                 padding: const EdgeInsets.symmetric(horizontal: 40, vertical: 14),
               ),
               icon: Icon(
@@ -514,7 +1249,7 @@ class _TsuperheroHomeState extends State<TsuperheroHome> {
             const SizedBox(height: 10),
             ElevatedButton(
               onPressed: () async {
-                final sharedHome = SharedHome.of(context);
+                final sharedHome = _getSharedHomeState();
                 if (sharedHome != null) {
                   await sharedHome.centerOnJeepMarker();
                 } else {
@@ -684,96 +1419,126 @@ class _TsuperheroHomeState extends State<TsuperheroHome> {
       // ADD TO BOTH FILES IN _buildPasaheroMenu() AND _buildDriverMenu()
 
   List<Widget> _buildDriverActions() => [
-    Column(
-      children: [
+    // Wrap the actions in a scrollable area so the bottom panel won't overflow
+    // on smaller screens. SharedHome places roleActions inside a constrained
+    // bottom panel; making this scrollable prevents RenderOverflow.
+    Builder(builder: (context) {
+      final screenH = UIUtils.screenHeight(context);
+      final bottomPanelHeight = math.min(screenH * 0.55, 380.0);
+      // Reserve some space for the panel handle area and paddings
+      final contentMaxHeight = (bottomPanelHeight - 72).clamp(120.0, bottomPanelHeight);
+      return ConstrainedBox(
+        constraints: BoxConstraints(maxHeight: contentMaxHeight),
+        child: SingleChildScrollView(
+          padding: const EdgeInsets.symmetric(vertical: 6, horizontal: 8),
+          child: Column(
+            children: [
         Row(
           children: [
-            // Passenger suggestion area - horizontal, bounded height
+            // Passenger suggestion area - horizontal, bounded height (responsive)
             Expanded(
-              child: SizedBox(
-                height: 120,
-                child: StreamBuilder<QuerySnapshot>(
-                  stream: FirebaseFirestore.instance
-                      .collection('para_requests')
-                      .where('status', isEqualTo: 'pending')
-                      .snapshots(),
-                  builder: (context, snapshot) {
-                    final cardWidth = UIUtils.responsiveCardWidth(context, fraction: 0.45, maxPx: 180.0);
+              child: Builder(
+                builder: (context) {
+                  // Mirror SharedHome's bottomPanelHeight calculation so this area
+                  // adapts to the available panel space and avoids overflow.
+                  final screenH = UIUtils.screenHeight(context);
+                  final bottomPanelHeight = math.min(screenH * 0.55, 380.0);
+                  // Allocate a fraction of bottom panel for the suggestion row.
+                  final suggestionHeight = math.max(64.0, math.min(bottomPanelHeight * 0.30, 120.0));
 
-                    if (!snapshot.hasData) {
-                      return const Center(child: CircularProgressIndicator());
-                    }
+                  return SizedBox(
+                    height: suggestionHeight,
+                    child: StreamBuilder<QuerySnapshot>(
+                      stream: FirebaseFirestore.instance
+                          .collection('para_requests')
+                          .where('status', isEqualTo: 'pending')
+                          .snapshots(),
+                      builder: (context, snapshot) {
+                        // Scale card width proportionally to suggestion height so the
+                        // layout remains balanced on different screen sizes.
+                        final baseCardWidth = UIUtils.responsiveCardWidth(context, fraction: 0.30, maxPx: 180.0);
+                        final scale = (suggestionHeight / 120.0).clamp(0.6, 1.0);
+                        // Increase passenger suggestion box size by 20% as requested.
+                        final increasedFactor = 1.2;
+                        final rawCard = baseCardWidth * scale * increasedFactor;
+                        // Clamp to a sensible maximum (1.2x the configured maxPx)
+                        final cardWidth = rawCard.clamp(48.0, 180.0 * increasedFactor);
 
-                    final docs = snapshot.data!.docs;
-                    // Filter requests that are reasonably close to driver (if we have tracker)
-                    final nearby = <QueryDocumentSnapshot>[];
-                    for (final d in docs) {
-                      final data = d.data() as Map<String, dynamic>;
-                      if (data['passengerLocation'] != null && _jeepMarker != null) {
-                        final GeoPoint gp = data['passengerLocation'];
-                        final dist = _distanceKm(LatLng(gp.latitude, gp.longitude), _jeepMarker!.position);
-                        if (dist <= 5.0) {
+                        if (!snapshot.hasData) {
+                          return const Center(child: CircularProgressIndicator());
+                        }
+
+                        final docs = snapshot.data!.docs;
+                        // Filter requests that are reasonably close to driver (if we have tracker)
+                        final nearby = <QueryDocumentSnapshot>[];
+                        for (final d in docs) {
+                          final data = d.data() as Map<String, dynamic>;
+                          if (data['passengerLocation'] != null && _jeepMarker != null) {
+                            final GeoPoint gp = data['passengerLocation'];
+                            final dist = _distanceKm(LatLng(gp.latitude, gp.longitude), _jeepMarker!.position);
+                            if (dist <= 5.0) {
+                              nearby.add(d);
+                              continue;
+                            }
+                          }
+                          // fallback: include anyway
                           nearby.add(d);
-                          continue;
-                        }
-                      }
-                      // fallback: include anyway
-                      nearby.add(d);
-                    }
-
-                    if (nearby.isEmpty) {
-                      return SingleChildScrollView(
-                        scrollDirection: Axis.horizontal,
-                        child: Row(children: [
-                          _buildPassengerPlaceholder(cardWidth),
-                          _buildPassengerPlaceholder(cardWidth * 0.9),
-                        ]),
-                      );
-                    }
-
-                    return ListView(
-                      scrollDirection: Axis.horizontal,
-                      children: nearby.take(6).map((d) {
-                        final data = d.data() as Map<String, dynamic>;
-                        final id = d.id;
-                        double? distKm;
-                        if (data['passengerLocation'] != null && _jeepMarker != null) {
-                          final gp = data['passengerLocation'] as GeoPoint;
-                          distKm = _distanceKm(LatLng(gp.latitude, gp.longitude), _jeepMarker!.position);
                         }
 
-                        return GestureDetector(
-                          onTap: () {
-                            // Driver taps passenger card - show info
-                            SnackbarService.show(context, 'Selected request $id');
-                          },
-                          child: Container(
-                            width: cardWidth,
-                            margin: const EdgeInsets.only(right: 8, top: 6, bottom: 6),
-                            padding: const EdgeInsets.all(8),
-                            decoration: BoxDecoration(
-                              color: Colors.white.withOpacity(0.06),
-                              borderRadius: BorderRadius.circular(10),
-                            ),
-                            child: Column(
-                              crossAxisAlignment: CrossAxisAlignment.start,
-                              children: [
-                                Text('Req $id', style: const TextStyle(color: Colors.white, fontWeight: FontWeight.bold)),
-                                const SizedBox(height: 6),
-                                Text(data['passengerName'] ?? 'Passenger', style: const TextStyle(color: Colors.white70, fontSize: 12)),
-                                const SizedBox(height: 6),
-                                Text(distKm != null ? '${distKm.toStringAsFixed(1)} km' : 'Calculating', style: const TextStyle(color: Colors.greenAccent, fontSize: 12)),
-                              ],
-                            ),
-                          ),
+                        if (nearby.isEmpty) {
+                          return SingleChildScrollView(
+                            scrollDirection: Axis.horizontal,
+                            child: Row(children: [
+                              _buildPassengerPlaceholder(cardWidth),
+                              _buildPassengerPlaceholder(cardWidth * 0.9),
+                            ]),
+                          );
+                        }
+
+                        return ListView(
+                          scrollDirection: Axis.horizontal,
+                          children: nearby.take(6).map((d) {
+                            final data = d.data() as Map<String, dynamic>;
+                            final id = d.id;
+                            double? distKm;
+                            if (data['passengerLocation'] != null && _jeepMarker != null) {
+                              final gp = data['passengerLocation'] as GeoPoint;
+                              distKm = _distanceKm(LatLng(gp.latitude, gp.longitude), _jeepMarker!.position);
+                            }
+
+                            return GestureDetector(
+                              onTap: () {
+                                // Driver taps passenger card - show info
+                                SnackbarService.show(context, 'Selected request $id');
+                              },
+                              child: Container(
+                                width: cardWidth,
+                                margin: const EdgeInsets.only(right: 8, top: 6, bottom: 6),
+                                padding: const EdgeInsets.all(8),
+                                decoration: BoxDecoration(
+                                  color: Colors.white.withOpacity(0.06),
+                                  borderRadius: BorderRadius.circular(10),
+                                ),
+                                child: Column(
+                                  crossAxisAlignment: CrossAxisAlignment.start,
+                                  children: [
+                                    Text('Req $id', style: const TextStyle(color: Colors.white, fontWeight: FontWeight.bold)),
+                                    const SizedBox(height: 6),
+                                    Text(data['passengerName'] ?? 'Passenger', style: const TextStyle(color: Colors.white70, fontSize: 12)),
+                                    const SizedBox(height: 6),
+                                    Text(distKm != null ? '${distKm.toStringAsFixed(1)} km' : 'Calculating', style: const TextStyle(color: Colors.greenAccent, fontSize: 12)),
+                                  ],
+                                ),
+                              ),
+                            );
+                          }).toList(),
                         );
-                      }).toList(),
-                    );
-                  },
-                ),
+                      },
+                    ),
+                  );
+                },
               ),
             ),
-            const SizedBox(width: 8),
             // Fare / small action button placeholder
             Container(
               margin: const EdgeInsets.only(right: 8),
@@ -793,18 +1558,20 @@ class _TsuperheroHomeState extends State<TsuperheroHome> {
           ],
         ),
 
-        const SizedBox(height: 8),
 
         // Seat management meter
         Container(
-          margin: const EdgeInsets.symmetric(horizontal: 16),
+          margin: const EdgeInsets.symmetric(horizontal: 5),
           child: Column(
             crossAxisAlignment: CrossAxisAlignment.start,
             children: [
-              const Text('Seats', style: TextStyle(color: Colors.white, fontWeight: FontWeight.bold)),
+              const Text('Seats', style: TextStyle(color: Colors.white, fontWeight: FontWeight.bold
+              ,height: 1)
+              
+              ),
               // Large, easy-to-tap +/- buttons for adjusting passenger count
               Padding(
-                padding: const EdgeInsets.symmetric(vertical: 8.0),
+                padding: const EdgeInsets.symmetric(vertical: 1.0),
                 child: Row(
                   mainAxisAlignment: MainAxisAlignment.center,
                   children: [
@@ -821,21 +1588,24 @@ class _TsuperheroHomeState extends State<TsuperheroHome> {
                       child: const Icon(Icons.remove, size: 36, color: Colors.white),
                     ),
 
-                    const SizedBox(width: 20),
+                    const SizedBox(width: 10),
 
                     // Passenger count display
-                    Container(
-                      padding: const EdgeInsets.symmetric(horizontal: 20, vertical: 12),
-                      decoration: BoxDecoration(
-                        color: Colors.white.withOpacity(0.06),
-                        borderRadius: BorderRadius.circular(12),
-                      ),
-                      child: Column(
-                        children: [
-                          Text('$_currentPassengers', style: const TextStyle(color: Colors.white, fontSize: 28, fontWeight: FontWeight.bold)),
-                          const SizedBox(height: 4),
-                          Text('/ $_maxCapacity', style: const TextStyle(color: Colors.white70, fontSize: 12)),
-                        ],
+                    GestureDetector(
+                      onTap: _showCapacityEditor,
+                      child: Container(
+                        padding: const EdgeInsets.symmetric(horizontal: 20, vertical: 12),
+                        decoration: BoxDecoration(
+                          color: Colors.white.withOpacity(0.06),
+                          borderRadius: BorderRadius.circular(12),
+                        ),
+                        child: Column(
+                          children: [
+                            Text('$_currentPassengers', style: const TextStyle(color: Colors.white, fontSize: 28, fontWeight: FontWeight.bold)),
+                            const SizedBox(height: 4),
+                            Text('/ $_maxCapacity', style: const TextStyle(color: Colors.white70, fontSize: 12)),
+                          ],
+                        ),
                       ),
                     ),
 
@@ -856,20 +1626,13 @@ class _TsuperheroHomeState extends State<TsuperheroHome> {
                   ],
                 ),
               ),
-              Row(
-                mainAxisAlignment: MainAxisAlignment.spaceBetween,
-                children: [
-                  Text('$_currentPassengers / $_maxCapacity', style: const TextStyle(color: Colors.white)),
-                  TextButton(onPressed: _showCapacityEditor, child: const Text('Edit')),
-                ],
-              ),
             ],
           ),
         ),
 
         // Destination / Route selector (wrapped with dropdown)
         Padding(
-          padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 8),
+          padding: const EdgeInsets.symmetric(horizontal: 5, vertical: 1),
           child: Column(
             children: [
               GestureDetector(
@@ -880,11 +1643,32 @@ class _TsuperheroHomeState extends State<TsuperheroHome> {
                 },
                 child: Column(
                   children: [
-                    DestinationDisplay(roleLabel: 'TSUPERHERO'),
-                    if (_selectedRoute.isNotEmpty)
+                    DestinationDisplay(roleLabel: 'TSUPERHERO', selectedRoute: _selectedRoute),
+                    // Confirm Route button appears when a route is selected but not yet confirmed
+                    if (_selectedRoute.isNotEmpty && _currentRouteSaved != _selectedRoute)
                       Padding(
-                        padding: const EdgeInsets.only(top: 6.0),
-                        child: Text('Selected: $_selectedRoute', style: const TextStyle(color: Colors.white70, fontSize: 12)),
+                        padding: const EdgeInsets.only(top: 8.0),
+                        child: Row(
+                          children: [
+                            Expanded(
+                              child: ElevatedButton(
+                                onPressed: () async {
+                                  // Confirm route: publish to Firestore and keep it saved
+                                  await _publishActiveRoute(_selectedRoute);
+                                  SnackbarService.show(context, 'Route confirmed: $_selectedRoute');
+                                },
+                                style: ElevatedButton.styleFrom(
+                                  backgroundColor: Colors.green,
+                                  shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(12)),
+                                ),
+                                child: const Padding(
+                                  padding: EdgeInsets.symmetric(vertical: 12.0),
+                                  child: Text('Confirm Route', style: TextStyle(color: Colors.white, fontWeight: FontWeight.bold)),
+                                ),
+                              ),
+                            ),
+                          ],
+                        ),
                       ),
                   ],
                 ),
@@ -902,13 +1686,29 @@ class _TsuperheroHomeState extends State<TsuperheroHome> {
                       return ListTile(
                         dense: true,
                         title: Text(r, style: const TextStyle(color: Colors.white)),
-                        onTap: () {
-                          setState(() {
-                            _selectedRoute = r;
-                            _showRouteMenu = false;
-                          });
-                          SnackbarService.show(context, 'Selected route: $r');
-                        },
+                        onTap: () async {
+                              setState(() {
+                                _selectedRoute = r;
+                                _showRouteMenu = false;
+                              });
+                              SnackbarService.show(context, 'Selected route: $r');
+                              // If driver is online and a different route was previously
+                              // published, remove that previous active route so it no
+                              // longer appears to passengers.
+                              try {
+                                final user = _auth.currentUser;
+                                if (user != null && _isOnline) {
+                                  final prev = (_currentRouteSaved != null && _currentRouteSaved!.isNotEmpty) ? _currentRouteSaved! : null;
+                                  if (prev != null && prev != r) {
+                                    await _removeActiveRouteForUser(user.uid, routeName: prev);
+                                  }
+                                }
+                              } catch (e) {
+                                debugPrint('Tsuper: failed removing previous route on select: $e');
+                              }
+                              // Load route points from Firestore and display polyline
+                              await _loadRoutePointsForName(r);
+                            },
                       );
                     }).toList(),
                   ),
@@ -916,7 +1716,11 @@ class _TsuperheroHomeState extends State<TsuperheroHome> {
             ],
           ),
         ),
-      ],
+        ],
+      ),
+        ),
+    );
+  }
     ),
   ];
 
